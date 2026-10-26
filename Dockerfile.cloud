@@ -1,0 +1,30 @@
+# One container for small free hosts (Render): Platform API + generation worker + Gemini TTS/OCR.
+# Local development keeps using platform-api/Dockerfile and docker-compose.yml.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /srv
+
+COPY platform-api/requirements.txt platform-api/requirements.txt
+COPY tts-service/requirements-cloud.txt tts-service/requirements-cloud.txt
+RUN pip install --no-cache-dir -r platform-api/requirements.txt -r tts-service/requirements-cloud.txt
+
+COPY platform-api platform-api
+COPY tts-service tts-service
+# Windows checkouts may convert scripts to CRLF, which /bin/sh cannot run.
+RUN sed 's/\r$//' platform-api/docker-entrypoint.sh > /usr/local/bin/docker-entrypoint.sh \
+    && sed 's/\r$//' platform-api/start-cloud.sh > /usr/local/bin/start-cloud.sh \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/start-cloud.sh \
+    && rm -rf platform-api/uploads platform-api/.env tts-service/.env tts-service/output
+
+WORKDIR /srv/platform-api
+ENV RUN_MIGRATIONS=true \
+    TTS_GENERATE_URL=http://127.0.0.1:8001/generate \
+    TTS_EXTRACT_URL=http://127.0.0.1:8001/extract-page \
+    MODEL_RUNNER_URL=http://127.0.0.1:8001/jobs
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["start-cloud.sh"]

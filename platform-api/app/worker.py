@@ -73,6 +73,7 @@ async def process(id, token):
                     output = folder / f"{id}-{token}-{index+1}.wav"
                     await asyncio.to_thread(output.write_bytes, response.content)
                     audio_key = f"/uploads/audio/{output.name}"
+                    await get_storage_service().persist(audio_key)
                 async with async_session_maker() as db:
                     job = await fenced(db, id, token)
                     # A page is committed atomically with its ordered audio chunk.

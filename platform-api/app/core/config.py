@@ -4,6 +4,8 @@ All credentials and environment variables are loaded here.
 """
 
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -70,15 +72,37 @@ class Settings(BaseSettings):
     # Sync connection string for Alembic migrations (optional override)
     SYNC_DATABASE_URL: Optional[str] = None
 
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def asyncpg_url(cls, url: str) -> str:
+        """
+        Accept a hosted provider's plain URL (Neon, Supabase, Render), e.g.
+        postgresql://u:p@host/db?sslmode=require&channel_binding=require, and
+        rewrite it for asyncpg, which takes `ssl` and rejects libpq-only options.
+        """
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                url = "postgresql+asyncpg://" + url[len(prefix):]
+        if not url.startswith("postgresql+asyncpg://"):
+            return url
+        parts = urlsplit(url)
+        query = {}
+        for key, value in parse_qsl(parts.query):
+            if key == "sslmode":
+                query["ssl"] = value
+            elif key != "channel_binding":
+                query[key] = value
+        return urlunsplit(parts._replace(query=urlencode(query)))
+
     @property
     def sync_database_url(self) -> str:
         """Returns a synchronous database URL for Alembic migrations."""
         if self.SYNC_DATABASE_URL:
             return self.SYNC_DATABASE_URL
-        # Replace async driver with sync driver (psycopg)
+        # Replace async driver with sync driver (psycopg); libpq wants sslmode, not ssl
         url = self.DATABASE_URL
         if "+asyncpg" in url:
-            return url.replace("+asyncpg", "+psycopg")
+            return url.replace("+asyncpg", "+psycopg").replace("ssl=", "sslmode=")
         if "+aiosqlite" in url:
             return url.replace("+aiosqlite", "")
         return url
@@ -89,8 +113,12 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
     # ── Storage ────────────────────────────────────────────────────────────
-    STORAGE_TYPE: str = "local"  # "local", future: "s3"
+    # "local" keeps files on disk only; "supabase" also mirrors them to Supabase
+    # Storage so they survive restarts on hosts with an ephemeral disk (Render).
+    STORAGE_TYPE: str = "local"
     UPLOAD_DIR: str = "uploads"
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "media"
     MAX_UPLOAD_SIZE_MB: int = 50
 
     # ── Model Runner Dispatcher ────────────────────────────────────────────

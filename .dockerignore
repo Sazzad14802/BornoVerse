@@ -1,0 +1,16 @@
+# Build context for Dockerfile.cloud (repository root)
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.env
+**/node_modules
+.git
+app
+admin
+branding
+platform-api/uploads
+platform-api/backups
+platform-api/tests
+platform-api/*.db
+tts-service/output

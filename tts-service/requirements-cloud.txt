@@ -1,0 +1,15 @@
+# Gemini OCR/TTS with Edge/Google TTS fallbacks, for small cloud instances (Render free).
+# Omits torch, Coqui TTS and EasyOCR (local models); requirements.txt keeps them.
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+httpx>=0.26.0
+numpy>=1.24.0
+pypdf>=5.0.0
+pypdfium2>=5.0.0
+python-multipart>=0.0.9
+google-genai>=2.30.0
+edge-tts>=7.3.0
+gTTS>=2.5.0
+miniaudio>=1.71

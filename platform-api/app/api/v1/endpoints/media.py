@@ -140,7 +140,9 @@ async def save_mp3(file: UploadFile) -> tuple[str, float]:
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(400, f"Invalid MP3 audio: {file.filename}")
-    return f"/uploads/audio/{path.name}", duration
+    key = f"/uploads/audio/{path.name}"
+    await get_storage_service().persist(key)
+    return key, duration
 
 
 @router.post("/audiobooks/{id}/audio")
@@ -166,7 +168,7 @@ async def upload_audio(id: UUID, db: DatabaseDep, user: ActivePublisherDep, file
             saved.append((key, duration, Path(file.filename or "").stem.strip()))
     except HTTPException:
         for key, _, _ in saved:
-            (Path(settings.UPLOAD_DIR) / "audio" / Path(key).name).unlink(missing_ok=True)
+            await get_storage_service().delete_file(key)
         raise
 
     existing = (await db.scalars(select(Chapter).where(Chapter.audiobook_id == id))).all()

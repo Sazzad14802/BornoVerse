@@ -55,6 +55,9 @@ class BaseStorageService(ABC):
         """Delete a stored file by URL/key."""
         pass
 
+    async def persist(self, file_url_or_key: str) -> None:
+        """Make a file written directly beneath UPLOAD_DIR durable (no-op on local disk)."""
+
 
 class LocalStorageService(BaseStorageService):
     """Local filesystem storage implementation."""
@@ -164,6 +167,76 @@ class LocalStorageService(BaseStorageService):
         return False
 
 
+class SupabaseStorageService(LocalStorageService):
+    """
+    Local disk as a cache, mirrored to a private Supabase Storage bucket.
+
+    Keys stay "/uploads/<folder>/<name>"; the object path is "<folder>/<name>".
+    A file missing from disk (after a restart) is downloaded again on first use.
+    """
+
+    def __init__(self, base_dir: Optional[str] = None):
+        super().__init__(base_dir)
+        self.endpoint = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}"
+        key = settings.SUPABASE_SERVICE_ROLE_KEY
+        self.headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+
+    @staticmethod
+    def object_path(file_url_or_key: str) -> str:
+        return file_url_or_key.lstrip("/").removeprefix("uploads/")
+
+    def local_path(self, file_url_or_key: str) -> Optional[Path]:
+        path = (self.base_dir / self.object_path(file_url_or_key)).resolve()
+        return path if path.is_relative_to(self.base_dir.resolve()) else None
+
+    async def persist(self, file_url_or_key: str) -> None:
+        import httpx
+        path = self.local_path(file_url_or_key)
+        if not path or not path.exists():
+            return
+        async with httpx.AsyncClient(timeout=300) as client:
+            response = await client.post(
+                f"{self.endpoint}/{self.object_path(file_url_or_key)}",
+                content=path.read_bytes(),
+                headers={**self.headers, "x-upsert": "true", "Content-Type": "application/octet-stream"},
+            )
+        if response.status_code >= 300:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Cloud storage upload failed: {response.text[:200]}")
+
+    async def save_upload_file(self, file: UploadFile, subfolder: str = "sources") -> str:
+        key = await super().save_upload_file(file, subfolder)
+        await self.persist(key)
+        return key
+
+    async def save_cover_image(self, file: UploadFile) -> str:
+        name = await super().save_cover_image(file)
+        await self.persist(f"/uploads/covers/{name}")
+        return name
+
+    async def get_file_path(self, file_url_or_key: str) -> Optional[str]:
+        import httpx
+        cached = await super().get_file_path(file_url_or_key)
+        path = self.local_path(file_url_or_key)
+        if cached or not path:
+            return cached
+        async with httpx.AsyncClient(timeout=300) as client:
+            response = await client.get(f"{self.endpoint}/{self.object_path(file_url_or_key)}", headers=self.headers)
+        if response.status_code != 200:
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(response.content)
+        return str(path)
+
+    async def delete_file(self, file_url_or_key: str) -> bool:
+        import httpx
+        removed = await super().delete_file(file_url_or_key)
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.delete(f"{self.endpoint}/{self.object_path(file_url_or_key)}", headers=self.headers)
+        return removed or response.status_code < 300
+
+
 def get_storage_service() -> BaseStorageService:
     """Storage service provider."""
+    if settings.STORAGE_TYPE == "supabase":
+        return SupabaseStorageService()
     return LocalStorageService()

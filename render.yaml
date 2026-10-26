@@ -1,0 +1,54 @@
+# Render Blueprint: New → Blueprint → pick this repository.
+# One free web service runs the API, the generation worker and the Gemini TTS/OCR
+# service (Dockerfile.cloud). The database lives on Neon and files on Supabase
+# Storage, because a free Render instance has no persistent disk.
+# Values marked `sync: false` are asked for once when the Blueprint is created.
+services:
+  - type: web
+    name: bornoverse-api
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile.cloud
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      # Neon connection string, pasted as-is (postgresql://...?sslmode=require)
+      - key: DATABASE_URL
+        sync: false
+      - key: SEED_DEMO_DATA
+        value: "true"
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      # Shared by the API and the TTS service inside the container
+      - key: TTS_SERVICE_KEY
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      # Admin portal origin on Vercel (the portal proxies /api, so this only guards browsers)
+      - key: ALLOWED_ORIGINS
+        value: https://bornoverse-admin.vercel.app
+      - key: STORAGE_TYPE
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: media
+      - key: SSLCOMMERZ_STORE_ID
+        sync: false
+      - key: SSLCOMMERZ_STORE_PASSWORD
+        sync: false
+      - key: SSLCOMMERZ_SANDBOX
+        value: "true"
+      - key: MOCK_PAYMENTS_ENABLED
+        value: "false"

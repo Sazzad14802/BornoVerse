@@ -11,7 +11,7 @@
 import { Platform, NativeModules } from 'react-native';
 import Constants from 'expo-constants';
 
-export const LAN_DEFAULT_IP = '192.168.0.118';
+export const LAN_DEFAULT_IP = '192.168.0.156';
 
 function isIpAddress(host: string): boolean {
   return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
