@@ -52,7 +52,8 @@ def create_app() -> FastAPI:
             raise RuntimeError("Production requires explicit CORS origins and a TTS service key")
 
     # ── Health check ───────────────────────────────────────────────────────
-    @app.get("/health", tags=["health"], summary="Health check")
+    # HEAD as well as GET: uptime monitors (UptimeRobot) send HEAD requests.
+    @app.api_route("/health", methods=["GET", "HEAD"], tags=["health"], summary="Health check")
     async def health() -> dict:
         """Returns a simple OK response to confirm the API is alive and running."""
         return {"status": "ok", "version": settings.APP_VERSION}
