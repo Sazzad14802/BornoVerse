@@ -4,10 +4,11 @@
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Colors, FontSizes, Spacing } from '../theme';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors, FontSizes, Radius, Spacing } from '../theme';
 
 interface ListRowProps {
-  icon?: string;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
   title: string;
   subtitle?: string;
   value?: string;
@@ -24,13 +25,17 @@ export function ListRow({ icon, title, subtitle, value, onPress, destructive, la
       style={({ pressed }) => [styles.row, !last && styles.divider, pressed && styles.pressed]}
       accessibilityRole={onPress ? 'button' : undefined}
     >
-      {icon ? <Text style={styles.icon}>{icon}</Text> : null}
+      {icon ? (
+        <View style={[styles.iconBox, destructive && styles.iconBoxDestructive]}>
+          <Ionicons name={icon} size={18} color={destructive ? Colors.error : Colors.primary} />
+        </View>
+      ) : null}
       <View style={styles.text}>
         <Text style={[styles.title, destructive && styles.destructive]}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
       {value ? <Text style={styles.value}>{value}</Text> : null}
-      {onPress && !destructive ? <Text style={styles.chevron}>›</Text> : null}
+      {onPress && !destructive ? <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} /> : null}
     </Pressable>
   );
 }
@@ -49,10 +54,16 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.6,
   },
-  icon: {
-    width: 24,
-    textAlign: 'center',
-    fontSize: 17,
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.sm + 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primarySurface,
+  },
+  iconBoxDestructive: {
+    backgroundColor: Colors.tintError,
   },
   text: {
     flex: 1,
@@ -74,9 +85,5 @@ const styles = StyleSheet.create({
   value: {
     fontSize: FontSizes.sm,
     color: Colors.textSecondary,
-  },
-  chevron: {
-    fontSize: 22,
-    color: Colors.textMuted,
   },
 });

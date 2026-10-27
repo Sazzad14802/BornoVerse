@@ -3,7 +3,7 @@ User database model.
 """
 
 from typing import TYPE_CHECKING
-from sqlalchemy import String, Boolean, Integer, DateTime, UniqueConstraint
+from sqlalchemy import String, Boolean, Integer, DateTime, FetchedValue, UniqueConstraint
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,6 +18,12 @@ if TYPE_CHECKING:
 
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "users"
+    # Read server-generated values (serial) back with INSERT ... RETURNING.
+    __mapper_args__ = {"eager_defaults": True}
+
+    # Human-readable member number (U-0001) shown to administrators. PostgreSQL
+    # fills it from the users_serial_seq sequence; the UUID stays the real key.
+    serial: Mapped[Optional[int]] = mapped_column(Integer, server_default=FetchedValue(), unique=True)
 
     username: Mapped[str] = mapped_column(
         String(50),

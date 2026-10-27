@@ -3,7 +3,7 @@ Audiobook router: discovery, creation, updates, visibility, PDF upload,
 generation job submission, status queries, and chapter access.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 import uuid
 from fastapi import APIRouter, File, Query, UploadFile, status
 
@@ -48,6 +48,7 @@ async def discover_audiobooks(
     publisher: uuid.UUID | None = None,
     channel: uuid.UUID | None = None,
     access_tier: str | None = None,
+    sort: Literal["newest", "oldest", "title", "shortest", "longest"] = "newest",
 ) -> AudiobookListResponse:
     """
     Public audiobook discovery endpoint.
@@ -61,7 +62,7 @@ async def discover_audiobooks(
         language=language,
         author=author,
         status_filter=status,
-        q=q, genre=genre, publisher=publisher, channel=channel, access_tier=access_tier,
+        q=q, genre=genre, publisher=publisher, channel=channel, access_tier=access_tier, sort=sort,
     )
     return AudiobookListResponse(
         items=[AudiobookRead.model_validate(item) for item in items],

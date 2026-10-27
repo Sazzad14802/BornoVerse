@@ -16,6 +16,7 @@ class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    serial: int | None = None
     created_at: datetime
     updated_at: datetime
     account_type: str

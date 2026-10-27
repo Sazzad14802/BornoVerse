@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     # Sync connection string for Alembic migrations (optional override)
     SYNC_DATABASE_URL: Optional[str] = None
 
+    @field_validator(
+        "SSLCOMMERZ_STORE_ID", "SSLCOMMERZ_STORE_PASSWORD", "SUPABASE_URL", "SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY", "DATABASE_URL", mode="before",
+    )
+    @classmethod
+    def strip_pasted_value(cls, value):
+        """Dashboard text boxes (Render) keep trailing spaces and newlines from a paste."""
+        return value.strip() if isinstance(value, str) else value
+
     @field_validator("DATABASE_URL")
     @classmethod
     def asyncpg_url(cls, url: str) -> str:

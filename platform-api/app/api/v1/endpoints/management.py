@@ -1,4 +1,5 @@
 """Administrative operations use a dedicated, database-verified role dependency."""
+import re
 from uuid import UUID
 from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Query
@@ -20,6 +21,23 @@ router = APIRouter()
 def record(row):
     return jsonable_encoder({c.name: getattr(row, c.name) for c in row.__table__.columns})
 
+async def with_member_numbers(db, rows, key: str):
+    """Records plus the member number (serial) of the user referenced by `key`."""
+    ids = {getattr(r, key) for r in rows}
+    serials = dict((await db.execute(select(User.id, User.serial).where(User.id.in_(ids)))).all()) if ids else {}
+    return [{**record(r), "member": serials.get(getattr(r, key))} for r in rows]
+
+@router.get("/attention")
+async def attention(db: DatabaseDep, admin: AdminDep):
+    """Work waiting for an administrator, per section (drives the sidebar badges)."""
+    counts = {}
+    for name, model, condition in [
+        ("applications", PublisherApplication, PublisherApplication.status == "pending"),
+        ("reports", Report, Report.status == "open"),
+        ("withdrawals", Withdrawal, Withdrawal.status == "pending")]:
+        counts[name] = await db.scalar(select(func.count()).select_from(model).where(condition))
+    return counts
+
 @router.get("/summary")
 async def summary(db: DatabaseDep, admin: AdminDep):
     result = {}
@@ -35,7 +53,11 @@ async def summary(db: DatabaseDep, admin: AdminDep):
 @router.get("/users")
 async def users(db: DatabaseDep, admin: AdminDep, q: str = "", account_type: str | None = None,
                 suspended: bool | None = None, page: int = Query(1, ge=1)):
-    query = select(User).where(or_(User.email.ilike(f"%{q}%"), User.username.ilike(f"%{q}%")))
+    matches = [User.email.ilike(f"%{q}%"), User.username.ilike(f"%{q}%")]
+    number = re.fullmatch(r"[uU]?-?0*(\d{1,9})", q.strip())
+    if number:
+        matches.append(User.serial == int(number.group(1)))
+    query = select(User).where(or_(*matches))
     if account_type == "publisher":
         # Publishers are users with an active publisher verification.
         query = query.where(User.account_type == "user", User.publisher_status == "active")
@@ -60,7 +82,8 @@ async def user_decision(id: UUID, data: Decision, db: DatabaseDep, admin: AdminD
 
 @router.get("/applications")
 async def applications(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(PublisherApplication).order_by(PublisherApplication.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+    rows = (await db.scalars(select(PublisherApplication).order_by(PublisherApplication.created_at.desc()).offset((page-1)*50).limit(50))).all()
+    return await with_member_numbers(db, rows, "user_id")
 
 @router.get("/applications/{id}/document")
 async def application_document(id: UUID, db: DatabaseDep, admin: AdminDep):
@@ -90,7 +113,8 @@ async def application_decision(id: UUID, data: Decision, db: DatabaseDep, admin:
         notice = notify(db, user.id, "publisher.approved", "প্রকাশক আবেদন অনুমোদিত",
                         "নিবন্ধন ফি পরিশোধ করে আপনার প্রকাশক অ্যাকাউন্ট চালু করুন।")
     else:
-        notice = notify(db, user.id, "publisher.rejected", "প্রকাশক আবেদন বাতিল", data.reason)
+        notice = notify(db, user.id, "publisher.rejected", "প্রকাশক আবেদন বাতিল হয়েছে",
+                        f"কারণ: {data.reason}")
     await db.commit()
     await deliver(db, [notice])
     return record(row)
@@ -115,9 +139,9 @@ async def moderate(kind: str, id: UUID, data: Decision, db: DatabaseDep, admin: 
     audit(db, admin, f"{kind}.{data.action}", id, reason=data.reason)
     owner_id = row.owner_id
     label = getattr(row, "title", None) or getattr(row, "name", "")
+    body = f"«{label}»" + (f"। কারণ: {data.reason}" if data.reason else "")
     notice = notify(db, owner_id, f"moderation.{data.action}",
-                    "কনটেন্ট সীমিত করা হয়েছে" if data.action == "restrict" else "কনটেন্ট পুনরায় চালু",
-                    f"«{label}»: {data.reason}")
+                    "কনটেন্ট সীমিত করা হয়েছে" if data.action == "restrict" else "কনটেন্ট পুনরায় চালু হয়েছে", body)
     await db.commit()
     await deliver(db, [notice])
     return record(row)
@@ -243,7 +267,8 @@ async def adjust(data: AdjustmentInput, db: DatabaseDep, admin: AdminDep):
 
 @router.get("/withdrawals")
 async def withdrawals(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(Withdrawal).order_by(Withdrawal.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+    rows = (await db.scalars(select(Withdrawal).order_by(Withdrawal.created_at.desc()).offset((page-1)*50).limit(50))).all()
+    return await with_member_numbers(db, rows, "publisher_id")
 
 @router.post("/withdrawals/{id}/decision")
 async def withdrawal_decision(id: UUID, data: Decision, db: DatabaseDep, admin: AdminDep):
@@ -261,7 +286,8 @@ async def withdrawal_decision(id: UUID, data: Decision, db: DatabaseDep, admin: 
                       kind="withdrawal", reference=f"withdrawal:{row.id}"))
     audit(db, admin, "withdrawal." + data.action, id, reason=data.reason, simulated=True)
     titles = {"approved": "উত্তোলন অনুমোদিত", "rejected": "উত্তোলন বাতিল", "completed": "উত্তোলন সম্পন্ন"}
-    notice = notify(db, row.publisher_id, f"withdrawal.{target}", titles[target], f"৳{row.amount} · {data.reason}")
+    body = f"৳{row.amount}" + (f"। কারণ: {data.reason}" if target == "rejected" and data.reason else "")
+    notice = notify(db, row.publisher_id, f"withdrawal.{target}", titles[target], body)
     await db.commit()
     await deliver(db, [notice])
     return record(row)

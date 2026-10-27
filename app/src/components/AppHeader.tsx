@@ -55,7 +55,7 @@ export function AppHeader({
             {backIcon === 'down' ? (
               <Ionicons name="chevron-down" size={26} color={Colors.textPrimary} />
             ) : (
-              <Text style={styles.backChevron}>‹</Text>
+              <Ionicons name="chevron-back" size={26} color={Colors.textPrimary} />
             )}
           </Pressable>
         ) : showLogo ? (
@@ -188,12 +188,6 @@ const styles = StyleSheet.create({
   iconButtonPressed: {
     opacity: 0.6,
     backgroundColor: Colors.overlayLight,
-  },
-  backChevron: {
-    fontSize: 28,
-    color: Colors.textPrimary,
-    lineHeight: 30,
-    fontWeight: '300',
   },
   dotsIcon: {
     fontSize: 22,

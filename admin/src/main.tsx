@@ -4,23 +4,105 @@ import { request, setToken, documentUrl } from "./api";
 import "./styles.css";
 
 type Row = Record<string, any>;
-const navigation = [
-  ["Overview", "summary"],
-  ["People", "users"],
-  ["Publisher verification", "applications"],
-  ["Audiobooks", "audiobooks"],
-  ["Channels", "channels"],
-  ["Content reports", "reports"],
-  ["Generation policy", "settings"],
-  ["Subscription plans", "plans"],
-  ["Payments", "payments"],
-  ["Refunds & adjustments", "adjustments"],
-  ["Financial reporting", "finance"],
-  ["Withdrawals", "withdrawals"],
-  ["Audit history", "audit"],
+const sections: [string, [string, string][]][] = [
+  ["", [["Overview", "summary"]]],
+  [
+    "Accounts",
+    [
+      ["People", "users"],
+      ["Publisher verification", "applications"],
+    ],
+  ],
+  [
+    "Catalog",
+    [
+      ["Audiobooks", "audiobooks"],
+      ["Channels", "channels"],
+      ["Content reports", "reports"],
+    ],
+  ],
+  [
+    "Revenue",
+    [
+      ["Subscription plans", "plans"],
+      ["Payments", "payments"],
+      ["Withdrawals", "withdrawals"],
+      ["Refunds & adjustments", "adjustments"],
+      ["Financial reporting", "finance"],
+    ],
+  ],
+  [
+    "System",
+    [
+      ["Generation policy", "settings"],
+      ["Audit history", "audit"],
+    ],
+  ],
 ];
+const navigation = sections.flatMap(([, items]) => items);
+/** Sidebar sections that carry a pending-work badge, keyed by page. */
+const attentionLabels: Record<string, string> = {
+  applications: "Publisher applications awaiting review",
+  reports: "Open content reports",
+  withdrawals: "Withdrawal requests awaiting approval",
+};
+/** What each confirm-only decision does; a rejection asks for a reason instead. */
+const consequences: Record<string, string> = {
+  approve: "The request is approved and the member is notified.",
+  suspend:
+    "The member is signed out and cannot use the platform until the account is restored.",
+  unsuspend: "The member regains access immediately.",
+  restrict: "The content is hidden from listeners and the owner is notified.",
+  restore: "The content becomes available to listeners again.",
+  resolve: "The report is marked as resolved.",
+  dismiss: "The report is closed without action.",
+  complete: "The payout is recorded as completed (simulated, no transfer).",
+};
+const headings: Record<string, string> = {
+  serial: "Member ID",
+  member: "Member ID",
+};
 const label = (text: string) =>
+  headings[text] ??
   text.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+const memberId = (value: unknown) =>
+  typeof value === "number" ? `U-${String(value).padStart(4, "0")}` : "—";
+const dateTime = (value: unknown) =>
+  value
+    ? new Date(String(value)).toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
+const ICONS: Record<string, string> = {
+  play: "M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z",
+  refresh:
+    "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z",
+  close:
+    "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
+  bell: "M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1z",
+  logout:
+    "M10.09 15.59 11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67zM19 3H5a2 2 0 0 0-2 2v4h2V5h14v14H5v-4H3v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z",
+  document:
+    "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h8v2H8zm0 4h8v2H8z",
+};
+function Icon({ name, size = 16 }: { name: string; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
 const money = (value: unknown) =>
   new Intl.NumberFormat("en-BD", { style: "currency", currency: "BDT" }).format(
     Number(value),
@@ -44,7 +126,34 @@ export function App() {
   const [audio, setAudio] = useState<Row[]>([]);
   const [document, setDocument] = useState("");
   const [plan, setPlan] = useState<Row | null>(null);
+  const [attention, setAttention] = useState<Record<string, number>>({});
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const requestSequence = useRef(0);
+
+  async function loadAttention() {
+    try {
+      const counts = await request("/admin/attention");
+      if (counts && !Array.isArray(counts)) setAttention(counts);
+    } catch {
+      // Badges are a convenience; the pages themselves report errors.
+    }
+  }
+  useEffect(() => {
+    if (!user) return;
+    loadAttention();
+    const timer = setInterval(loadAttention, 30_000);
+    return () => clearInterval(timer);
+  }, [user]);
+  const pendingTotal = Object.values(attention).reduce((a, b) => a + b, 0);
+  function open(key: string) {
+    setPage(key);
+    setRows(null);
+    setSearch("");
+    setRole("");
+    setNumber(1);
+    setNotice("");
+    setAlertsOpen(false);
+  }
 
   async function load() {
     const sequence = ++requestSequence.current;
@@ -87,6 +196,7 @@ export function App() {
       await request(path, method, body);
       setNotice("Changes saved.");
       await load();
+      loadAttention();
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -127,64 +237,105 @@ export function App() {
             BornoVerse<small>ADMINISTRATION</small>
           </span>
         </a>
-        <div className="workspace">
-          Workspace <span>Platform operations</span>
-        </div>
         <nav aria-label="Administration">
-          {navigation.map(([name, key], i) => (
-            <button
-              key={key}
-              className={page === key ? "selected" : ""}
-              onClick={() => {
-                setPage(key);
-                setRows(null);
-                setSearch("");
-                setRole("");
-                setNumber(1);
-                setNotice("");
-              }}
-            >
-              <span className="nav-num">{String(i + 1).padStart(2, "0")}</span>
-              {name}
-            </button>
+          {sections.map(([heading, items]) => (
+            <div className="nav-group" key={heading || "home"}>
+              {heading && <span className="nav-heading">{heading}</span>}
+              {items.map(([name, key]) => (
+                <button
+                  key={key}
+                  className={page === key ? "selected" : ""}
+                  aria-current={page === key ? "page" : undefined}
+                  onClick={() => open(key)}
+                >
+                  <span>{name}</span>
+                  {attention[key] > 0 && (
+                    <span
+                      className="nav-badge"
+                      aria-label={`${attention[key]} pending`}
+                    >
+                      {attention[key]}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="account">
-          <strong>{user.username}</strong>
-          <small>Administrator</small>
+          <span className="avatar" aria-hidden="true">
+            {String(user.username || "A")
+              .slice(0, 1)
+              .toUpperCase()}
+          </span>
+          <div className="account-text">
+            <strong>{user.username}</strong>
+            <small>Administrator</small>
+          </div>
           <button
+            className="icon-button"
+            aria-label="Sign out"
+            title="Sign out"
             onClick={async () => {
               await request("/auth/logout", "POST").catch(() => {});
               setToken("");
               setUser(null);
             }}
           >
-            Sign out
+            <Icon name="logout" size={18} />
           </button>
         </div>
       </aside>
       <main>
         <header>
           <div>
-            <p className="eyebrow">BORNOVERSE / OPERATIONS</p>
+            <p className="eyebrow">Administration</p>
             <h1>{title}</h1>
           </div>
-          <button className="secondary" disabled={busy} onClick={load}>
-            ↻ Refresh
-          </button>
+          <div className="header-actions">
+            <div className="alerts">
+              <button
+                className="icon-button bordered"
+                aria-label={`Pending work: ${pendingTotal}`}
+                aria-expanded={alertsOpen}
+                onClick={() => setAlertsOpen((v) => !v)}
+              >
+                <Icon name="bell" size={18} />
+                {pendingTotal > 0 && <span className="dot" />}
+              </button>
+              {alertsOpen && (
+                <div className="alerts-menu" role="menu">
+                  <strong>Needs attention</strong>
+                  {pendingTotal === 0 ? (
+                    <p>Nothing is waiting for review.</p>
+                  ) : (
+                    Object.entries(attention)
+                      .filter(([, n]) => n > 0)
+                      .map(([key, n]) => (
+                        <button
+                          key={key}
+                          role="menuitem"
+                          className="alerts-item"
+                          onClick={() => open(key)}
+                        >
+                          <span>{attentionLabels[key] ?? label(key)}</span>
+                          <span className="nav-badge">{n}</span>
+                        </button>
+                      ))
+                  )}
+                </div>
+              )}
+            </div>
+            <button className="secondary" disabled={busy} onClick={load}>
+              <Icon name="refresh" />
+              Refresh
+            </button>
+          </div>
         </header>
         {page === "summary" && (
-          <div className="intro">
-            <div>
-              <span className="eyebrow">YOUR PLATFORM, AT A GLANCE</span>
-              <h2>A home for every story.</h2>
-              <p>
-                Review publishers, protect your catalog, and keep the listening
-                experience running smoothly.
-              </p>
-            </div>
-            <img className="intro-art" src="/logo.svg" alt="" aria-hidden="true" />
-          </div>
+          <p className="lead">
+            Platform health and the work waiting for review.
+          </p>
         )}
         {error && (
           <div role="alert" className="error">
@@ -236,20 +387,28 @@ export function App() {
                 <article key={key}>
                   <span>{label(key)}</span>
                   <strong>{String(value)}</strong>
-                  <small>Current database total</small>
                 </article>
               ))}
             </div>
             <section className="panel">
-              <h2>Review queue</h2>
-              <p>
-                Any user can apply to become a publisher. Activation requires
-                document approval and a confirmed registration payment; only then
-                can they open channels and publish.
-              </p>
-              <button onClick={() => setPage("applications")}>
-                Review publisher applications →
-              </button>
+              <h2>Needs attention</h2>
+              {pendingTotal === 0 ? (
+                <p>Nothing is waiting for review.</p>
+              ) : (
+                <ul className="queue">
+                  {Object.entries(attention)
+                    .filter(([, n]) => n > 0)
+                    .map(([key, n]) => (
+                      <li key={key}>
+                        <span>{attentionLabels[key] ?? label(key)}</span>
+                        <span className="nav-badge">{n}</span>
+                        <button className="secondary" onClick={() => open(key)}>
+                          Review
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              )}
             </section>
           </>
         )}
@@ -401,6 +560,7 @@ export function App() {
                           }
                         }}
                       >
+                        <Icon name="document" size={14} />
                         View document
                       </button>
                       {row.status === "pending" && (
@@ -451,6 +611,7 @@ export function App() {
                           className="secondary"
                           onClick={() => listen(row.id)}
                         >
+                          <Icon name="play" size={14} />
                           Listen
                         </button>
                       )}
@@ -462,7 +623,8 @@ export function App() {
                         className="secondary"
                         onClick={() => listen(row.audiobook_id)}
                       >
-                        Investigate audio
+                        <Icon name="play" size={14} />
+                        Listen
                       </button>
                       {row.status === "open" && (
                         <>
@@ -567,30 +729,58 @@ export function App() {
           close={() => setDecision(null)}
         >
           <form
+            className="decision"
             onSubmit={async (e) => {
               e.preventDefault();
+              const rejecting = decision.action === "reject";
               if (
                 await mutate(decision.path, "POST", {
                   action: decision.action,
-                  reason,
+                  ...(rejecting ? { reason: reason.trim() } : {}),
                 })
               )
                 setDecision(null);
             }}
           >
-            <label>
-              Decision reason
-              <textarea
-                autoFocus
-                required
-                minLength={3}
-                maxLength={2000}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            </label>
-            <p>This decision is recorded in the audit history.</p>
-            <button disabled={busy}>Confirm {decision.action}</button>
+            {decision.action === "reject" ? (
+              <>
+                <label>
+                  Reason for rejection
+                  <textarea
+                    autoFocus
+                    required
+                    minLength={3}
+                    maxLength={2000}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  />
+                </label>
+                <p>
+                  The member receives this reason in their notifications. The
+                  decision is recorded in the audit history.
+                </p>
+              </>
+            ) : (
+              <p>
+                {consequences[decision.action] ?? "Confirm this decision."} The
+                decision is recorded in the audit history.
+              </p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setDecision(null)}
+              >
+                Cancel
+              </button>
+              <button
+                disabled={busy}
+                className={decision.action === "reject" ? "danger" : ""}
+              >
+                Confirm {decision.action}
+              </button>
+            </div>
           </form>
         </Modal>
       )}
@@ -649,13 +839,18 @@ export function App() {
         </Modal>
       )}
       {audio.length > 0 && (
-        <Modal title="Authorized audiobook playback" close={() => setAudio([])}>
-          {audio.map((c) => (
-            <div key={c.id}>
-              <p>{c.title}</p>
-              <audio controls preload="none" src={c.audio_url} />
-            </div>
-          ))}
+        <Modal title="Listen" close={() => setAudio([])}>
+          <ol className="tracks">
+            {audio.map((c, i) => (
+              <li key={c.id}>
+                <span className="track-number">{i + 1}</span>
+                <div className="track-body">
+                  <strong>{c.title}</strong>
+                  <audio controls preload="none" src={c.audio_url} />
+                </div>
+              </li>
+            ))}
+          </ol>
         </Modal>
       )}
       {document && (
@@ -673,8 +868,16 @@ export function App() {
   );
 }
 const columns: Record<string, string[]> = {
-  users: ["username", "email", "account_type", "publisher_status", "suspended"],
-  applications: ["legal_name", "user_id", "status", "reason", "created_at"],
+  users: [
+    "serial",
+    "username",
+    "email",
+    "account_type",
+    "publisher_status",
+    "suspended",
+    "created_at",
+  ],
+  applications: ["legal_name", "member", "status", "reason", "created_at"],
   audiobooks: [
     "title",
     "author",
@@ -686,7 +889,7 @@ const columns: Record<string, string[]> = {
   reports: ["reason", "audiobook_id", "status", "resolution"],
   plans: ["name", "months", "price", "active"],
   payments: ["id", "kind", "amount", "status", "created_at"],
-  withdrawals: ["publisher_id", "amount", "destination", "status", "reason"],
+  withdrawals: ["member", "amount", "destination", "status", "reason"],
   adjustments: ["created_at", "order_id", "kind", "amount", "reason"],
   audit: ["created_at", "action", "actor_id", "target", "details"],
 };
@@ -722,9 +925,13 @@ function DataTable({
               <tr key={row.id || row.month || i}>
                 {columns.map((c) => (
                   <td key={c}>
-                    {c === "status" ||
-                    c === "publisher_status" ||
-                    c === "account_type" ? (
+                    {c === "serial" || c === "member" ? (
+                      <span className="mono">{memberId(row[c])}</span>
+                    ) : c.endsWith("_at") ? (
+                      dateTime(row[c])
+                    ) : c === "status" ||
+                      c === "publisher_status" ||
+                      c === "account_type" ? (
                       <span className={`badge ${row[c]}`}>
                         {label(String(row[c]))}
                       </span>
@@ -800,11 +1007,11 @@ function Modal({
         <div className="modal-heading">
           <h2>{title}</h2>
           <button
-            className="secondary"
+            className="icon-button"
             onClick={close}
             aria-label="Close dialog"
           >
-            ×
+            <Icon name="close" size={20} />
           </button>
         </div>
         {children}
@@ -850,8 +1057,8 @@ function Login({ onLogin }: { onLogin: (user: Row) => void }) {
           }
         }}
       >
-        <p className="eyebrow">ADMINISTRATOR ACCESS</p>
-        <h2>Welcome back.</h2>
+        <p className="eyebrow">Administrator access</p>
+        <h2>Welcome back</h2>
         <p>Sign in with your dedicated administrator account.</p>
         <label>
           Email or username
@@ -871,9 +1078,7 @@ function Login({ onLogin }: { onLogin: (user: Row) => void }) {
             {error}
           </p>
         )}
-        <button disabled={busy}>
-          {busy ? "Signing in…" : "Sign in to workspace →"}
-        </button>
+        <button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         <small>
           Administrator accounts are provisioned by the platform operator.
         </small>

@@ -106,6 +106,16 @@ async def get_audiobook_raw(
     return result.scalar_one_or_none()
 
 
+# Catalog sort options; Audiobook.id breaks ties so pages never overlap.
+CATALOG_ORDER = {
+    "newest": (Audiobook.created_at.desc(),),
+    "oldest": (Audiobook.created_at.asc(),),
+    "title": (func.lower(Audiobook.title).asc(),),
+    "shortest": (Audiobook.duration_seconds.asc(),),
+    "longest": (Audiobook.duration_seconds.desc(),),
+}
+
+
 async def get_public_audiobooks(
     db: AsyncSession,
     page: int = 1,
@@ -118,6 +128,7 @@ async def get_public_audiobooks(
     publisher: Optional[uuid.UUID] = None,
     channel: Optional[uuid.UUID] = None,
     access_tier: Optional[str] = None,
+    sort: str = "newest",
 ) -> tuple[list[Audiobook], int, int]:
     """
     Public audiobook discovery endpoint.
@@ -158,7 +169,7 @@ async def get_public_audiobooks(
     query = (
         select(Audiobook)
         .where(*conditions)
-        .order_by(Audiobook.created_at.desc())
+        .order_by(*CATALOG_ORDER.get(sort, CATALOG_ORDER["newest"]), Audiobook.id)
         .offset((page - 1) * size)
         .limit(size)
     )

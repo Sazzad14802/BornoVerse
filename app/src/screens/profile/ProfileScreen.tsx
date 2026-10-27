@@ -116,13 +116,13 @@ export function ProfileScreen() {
             <Text style={styles.userEmail}>{user.email}</Text>
             <View style={styles.badgeRow}>
               <TagBadge label={premium ? tx('প্রিমিয়াম', 'PREMIUM') : tx('ফ্রি', 'FREE')} variant={premium ? 'premium' : 'free'} />
-              {isPublisher ? <TagBadge label={tx('🎙 প্রকাশক', '🎙 PUBLISHER')} variant="genre" /> : null}
+              {isPublisher ? <TagBadge label={tx('প্রকাশক', 'PUBLISHER')} variant="genre" /> : null}
             </View>
           </View>
         </View>
 
         <View style={[styles.highlightCard, premium && styles.premiumCard]}>
-            <Text style={styles.highlightTitle}>{premium ? tx('প্রিমিয়াম সক্রিয় ✨', 'Premium is active ✨') : tx('প্রিমিয়ামে আপগ্রেড করুন', 'Upgrade to Premium')}</Text>
+            <Text style={styles.highlightTitle}>{premium ? tx('প্রিমিয়াম সক্রিয়', 'Premium is active') : tx('প্রিমিয়ামে আপগ্রেড করুন', 'Upgrade to Premium')}</Text>
             <Text style={styles.highlightText}>
               {premium
                 ? tx(`মেয়াদ: ${formatDate(user.premium_until, false)}`, `Valid until ${formatDate(user.premium_until, true)}`)
@@ -137,9 +137,9 @@ export function ProfileScreen() {
           </View>
 
         <FormCard style={styles.menu}>
-          <ListRow icon="🎧" title={tx('আমার অডিওবুক', 'My audiobooks')} subtitle={tx('তৈরি ও সম্পাদনা', 'Created & edit')} onPress={() => navigation.navigate('MyAudiobooks')} />
+          <ListRow icon="headset-outline" title={tx('আমার অডিওবুক', 'My audiobooks')} subtitle={tx('তৈরি ও সম্পাদনা', 'Created & edit')} onPress={() => navigation.navigate('MyAudiobooks')} />
           <ListRow
-            icon="🎙"
+            icon="mic-outline"
             title={isPublisher ? tx('প্রকাশক স্টুডিও', 'Publisher studio') : tx('প্রকাশক হোন', 'Become a publisher')}
             subtitle={
               isPublisher
@@ -151,13 +151,13 @@ export function ProfileScreen() {
             onPress={() => navigation.navigate('Publisher')}
           />
           <ListRow
-            icon="🔔"
+            icon="notifications-outline"
             title={tx('নোটিফিকেশন', 'Notifications')}
             value={unreadCount ? tx(`${unreadCount}টি নতুন`, `${unreadCount} new`) : undefined}
             onPress={() => navigation.navigate('Notifications')}
           />
-          <ListRow icon="🧾" title={tx('পেমেন্ট ইতিহাস', 'Payment history')} onPress={() => navigation.navigate('Subscription')} />
-          <ListRow icon="✏️" title={tx('নাম পরিবর্তন', 'Edit name')} value={displayName} onPress={() => setEditingName(true)} last />
+          <ListRow icon="receipt-outline" title={tx('পেমেন্ট ইতিহাস', 'Payment history')} onPress={() => navigation.navigate('Subscription')} />
+          <ListRow icon="create-outline" title={tx('নাম পরিবর্তন', 'Edit name')} value={displayName} onPress={() => setEditingName(true)} last />
         </FormCard>
 
         <FormCard style={styles.menu}>
@@ -172,7 +172,7 @@ export function ProfileScreen() {
             ]}
           />
           <ListRow
-            icon="📳"
+            icon="phone-portrait-outline"
             title={tx('পুশ নোটিফিকেশন', 'Push notifications')}
             subtitle={
               permission === 'granted'
@@ -185,7 +185,7 @@ export function ProfileScreen() {
         </FormCard>
 
         <FormCard style={styles.menu}>
-          <ListRow icon="↩︎" title={tx('সাইন আউট', 'Sign out')} onPress={signOut} destructive last />
+          <ListRow icon="log-out-outline" title={tx('সাইন আউট', 'Sign out')} onPress={signOut} destructive last />
         </FormCard>
 
         <Text style={styles.version}>

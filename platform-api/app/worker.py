@@ -97,7 +97,7 @@ async def process(id, token):
                 job.completed_at = datetime.now(timezone.utc)
                 job.lease_token = None
                 notice = notify(db, job.owner_id, "generation.completed",
-                                "অডিওবুক প্রস্তুত 🎧", f"«{book.title}» শোনার জন্য প্রস্তুত।",
+                                "অডিওবুক প্রস্তুত", f"«{book.title}» শোনার জন্য প্রস্তুত।",
                                 audiobook_id=book.id, job_id=job.id)
                 await db.commit()
                 await deliver(db, [notice])

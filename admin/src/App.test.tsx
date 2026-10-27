@@ -35,10 +35,24 @@ beforeEach(() => {
           open_reports: 0,
           queued_jobs: 2,
         };
+      if (path.includes("/admin/attention"))
+        data = { applications: 2, reports: 0, withdrawals: 0 };
+      if (path.includes("/admin/applications?"))
+        data = [
+          {
+            id: "app-1",
+            legal_name: "Bengal Press",
+            member: 7,
+            status: "pending",
+            reason: "",
+            created_at: "2026-10-20T10:00:00Z",
+          },
+        ];
       if (path.includes("/admin/users?"))
         data = [
           {
             id: "user-1",
+            serial: 3,
             username: "Reader",
             email: "reader@example.com",
             account_type: "user",
@@ -58,8 +72,8 @@ async function login() {
   fireEvent.change(screen.getByLabelText("Password"), {
     target: { value: "example-password" },
   });
-  fireEvent.click(screen.getByText("Sign in to workspace →"));
-  await screen.findByText("A home for every story.");
+  fireEvent.click(screen.getByText("Sign in"));
+  await screen.findByText("Platform health and the work waiting for review.");
 }
 test("dedicated login renders real returned dashboard counts", async () => {
   await login();
@@ -67,14 +81,13 @@ test("dedicated login renders real returned dashboard counts", async () => {
   expect(requests[0].path).toBe("/api/v1/auth/admin-login");
   expect(screen.getByText("12")).toBeTruthy();
 });
-test("suspension requires a reason and calls the authorized endpoint", async () => {
+test("people show serial member IDs; suspension is confirm-only", async () => {
   await login();
   fireEvent.click(screen.getByText("People"));
   await screen.findByText("reader@example.com");
+  expect(screen.getByText("U-0003")).toBeTruthy();
   fireEvent.click(screen.getByText("Suspend"));
-  fireEvent.change(screen.getByLabelText("Decision reason"), {
-    target: { value: "Investigation requires suspension" },
-  });
+  expect(screen.queryByLabelText("Reason for rejection")).toBeNull();
   fireEvent.click(screen.getByText("Confirm suspend"));
   await waitFor(() =>
     expect(
@@ -82,7 +95,28 @@ test("suspension requires a reason and calls the authorized endpoint", async () 
         (r) =>
           r.path === "/api/v1/admin/users/user-1/decision" &&
           r.body.action === "suspend" &&
-          r.body.reason === "Investigation requires suspension",
+          r.body.reason === undefined,
+      ),
+    ).toBe(true),
+  );
+});
+test("pending applications are badged and rejection requires a reason", async () => {
+  await login();
+  expect(await screen.findByLabelText("2 pending")).toBeTruthy();
+  fireEvent.click(screen.getByText("Publisher verification"));
+  await screen.findByText("Bengal Press");
+  fireEvent.click(screen.getByText("Reject"));
+  fireEvent.change(screen.getByLabelText("Reason for rejection"), {
+    target: { value: "Document is unreadable" },
+  });
+  fireEvent.click(screen.getByText("Confirm reject"));
+  await waitFor(() =>
+    expect(
+      requests.some(
+        (r) =>
+          r.path === "/api/v1/admin/applications/app-1/decision" &&
+          r.body.action === "reject" &&
+          r.body.reason === "Document is unreadable",
       ),
     ).toBe(true),
   );
@@ -103,7 +137,9 @@ test("failed login stays on sign-in and shows server feedback", async () => {
   fireEvent.change(screen.getByLabelText("Password"), {
     target: { value: "wrong" },
   });
-  fireEvent.click(screen.getByText("Sign in to workspace →"));
+  fireEvent.click(screen.getByText("Sign in"));
   expect(await screen.findByRole("alert")).toBeTruthy();
-  expect(screen.queryByText("A home for every story.")).toBeNull();
+  expect(
+    screen.queryByText("Platform health and the work waiting for review."),
+  ).toBeNull();
 });

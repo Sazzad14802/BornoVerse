@@ -154,7 +154,7 @@ export function ChannelScreen() {
         : book.visibility === 'PUBLIC'
           ? tx('প্রকাশিত', 'Published')
           : tx('অপ্রকাশিত', 'Unpublished');
-    const access = book.access_tier === 'premium' ? tx(' · ⭐ প্রিমিয়াম', ' · ⭐ Premium') : '';
+    const access = book.access_tier === 'premium' ? tx(' · প্রিমিয়াম', ' · Premium') : '';
     return `${status}${access}${book.moderated ? ` · ${tx('সীমিত', 'Restricted')}` : ''}`;
   };
 
@@ -202,7 +202,7 @@ export function ChannelScreen() {
             {channel.description ? <Text style={styles.description}>{channel.description}</Text> : null}
             <View style={styles.actions}>
               <View style={styles.flex}>
-                <AppButton label={tx('⬆ MP3 আপলোড', '⬆ Upload MP3s')} onPress={openUpload} disabled={channel.moderated} />
+                <AppButton label={tx('MP3 আপলোড', 'Upload MP3s')} onPress={openUpload} disabled={channel.moderated} />
               </View>
               <View style={styles.flex}>
                 <AppButton
@@ -285,12 +285,12 @@ export function ChannelScreen() {
             onChange={setTier}
             options={[
               { value: 'free', label: tx('ফ্রি', 'Free') },
-              { value: 'premium', label: tx('⭐ প্রিমিয়াম', '⭐ Premium') },
+              { value: 'premium', label: tx('প্রিমিয়াম', 'Premium') },
             ]}
             hint={tier === 'premium' ? tx('প্রিমিয়াম শ্রোতাদের যোগ্য শোনা থেকে আয় হয়।', 'Earns revenue from eligible premium listens.') : undefined}
           />
           <AppButton
-            label={files.length ? tx(`🎙 ${files.length}টি MP3 বেছে নেওয়া হয়েছে`, `🎙 ${files.length} MP3 selected`) : tx('🎙 MP3 ফাইল বেছে নিন', '🎙 Choose MP3 files')}
+            label={files.length ? tx(`${files.length}টি MP3 বেছে নেওয়া হয়েছে`, `${files.length} MP3 selected`) : tx('MP3 ফাইল বেছে নিন', 'Choose MP3 files')}
             variant="secondary"
             onPress={chooseFiles}
           />
@@ -312,7 +312,7 @@ export function ChannelScreen() {
               {candidates.map((book, i) => (
                 <ListRow
                   key={book.id}
-                  icon="🎧"
+                  icon="headset-outline"
                   title={book.title}
                   subtitle={busy === `add:${book.id}` ? tx('প্রকাশ হচ্ছে…', 'Publishing…') : book.author ?? undefined}
                   onPress={busy ? undefined : () => addExisting(book)}

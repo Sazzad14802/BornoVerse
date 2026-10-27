@@ -7,6 +7,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { ActivityIndicator, Animated, GestureResponderEvent, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { usePlayer } from '../contexts/PlayerContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { BookCover } from './BookCover';
@@ -144,7 +145,7 @@ export function PersistentMiniPlayer({ onPress }: PersistentMiniPlayerProps) {
               hitSlop={8}
               accessibilityLabel={tx('বন্ধ করুন', 'Close player')}
             >
-              <Text style={styles.forwardIcon}>×</Text>
+              <Ionicons name="close" size={22} color={Colors.textOnDark} />
             </Pressable>
           ) : (
             <>
@@ -156,9 +157,9 @@ export function PersistentMiniPlayer({ onPress }: PersistentMiniPlayerProps) {
                 accessibilityLabel={isPlaying ? tx('বিরতি', 'Pause') : tx('চালু করুন', 'Play')}
               >
                 {isLoading && !isPlaying ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={Colors.textOnDark} />
                 ) : (
-                  <Text style={styles.playIcon}>{isPlaying ? '❚❚' : '▶'}</Text>
+                  <Ionicons name={isPlaying ? 'pause' : 'play'} size={22} color={Colors.textOnDark} />
                 )}
               </Pressable>
               <Pressable
@@ -172,7 +173,7 @@ export function PersistentMiniPlayer({ onPress }: PersistentMiniPlayerProps) {
                 hitSlop={8}
                 accessibilityLabel={tx('পরের অধ্যায়', 'Next chapter')}
               >
-                <Text style={styles.forwardIcon}>›</Text>
+                <Ionicons name="play-skip-forward" size={20} color={Colors.textOnDark} />
               </Pressable>
             </>
           )}
@@ -241,16 +242,5 @@ const styles = StyleSheet.create({
   },
   controlDisabled: {
     opacity: 0.3,
-  },
-  playIcon: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  forwardIcon: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    lineHeight: 26,
-    fontWeight: 'bold',
   },
 });

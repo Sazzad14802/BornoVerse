@@ -6,11 +6,14 @@
  * - Keep one listening session per book: chapter changes renew grants on the same
  *   session so the server's listening-time accounting is not reset.
  * - Sync position to the server and send listening heartbeats while playing.
- * - Auto-advance chapters, playback speed, lock-screen controls.
+ * - Auto-advance chapters, playback speed.
+ * - Background playback and notification controls are a Premium feature: free
+ *   listeners are paused when the app leaves the foreground.
  * Errors are surfaced through `error` so screens can show them.
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { AudioPlayer, AudioStatus, createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { ApiError, errorMessage } from '../api/client';
@@ -18,6 +21,7 @@ import { playbackApi } from '../api/playback';
 import { MEDIA_GRANT_REFRESH_MS, PLAYBACK_SYNC_INTERVAL_MS, resolveMediaUrl } from '../config';
 import { offline } from '../storage/offline';
 import { Audiobook } from '../types/audiobook';
+import { isPremium } from '../types/auth';
 import { PlayManifestChapter } from '../types/domain';
 import { useAuth } from './AuthContext';
 
@@ -83,6 +87,9 @@ const lockScreenSupported = Constants.executionEnvironment !== ExecutionEnvironm
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const premium = isPremium(user);
+  const premiumRef = useRef(premium);
+  premiumRef.current = premium;
   const [state, setState] = useState<PlayerState>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -122,17 +129,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     offline.clearPlayback();
   }, [disposePlayer]);
 
+  useEffect(
+    () => () => {
+      disposePlayer();
+      offline.clearPlayback();
+    },
+    [disposePlayer],
+  );
+
+  /** Show (Premium) or hide the notification / lock screen controls for a player. */
+  const applyLockScreen = useCallback(
+    (
+      instance: AudioPlayer | null,
+      book = stateRef.current.audiobook,
+      chapter: PlayerChapter | undefined = stateRef.current.chapters[stateRef.current.currentChapterIndex],
+    ) => {
+    if (!lockScreenSupported || !instance || !book || !chapter) return;
+    try {
+      if (premiumRef.current) {
+        instance.setActiveForLockScreen(
+          true,
+          {
+            title: chapter.title,
+            artist: book.title,
+            albumTitle: book.author ?? 'BornoVerse',
+            artworkUrl: resolveMediaUrl(book.cover_image_url),
+          },
+          { showSeekForward: true, showSeekBackward: true },
+        );
+      } else {
+        instance.setActiveForLockScreen(false);
+      }
+    } catch {}
+    },
+    [],
+  );
+
+  // Background playback follows the subscription; re-applied when it changes.
   useEffect(() => {
     setAudioModeAsync({
       playsInSilentMode: true,
-      shouldPlayInBackground: true,
+      shouldPlayInBackground: premium,
       interruptionMode: 'doNotMix',
     }).catch(() => {});
-    return () => {
-      disposePlayer();
-      offline.clearPlayback();
-    };
-  }, [disposePlayer]);
+    applyLockScreen(player.current);
+  }, [premium, applyLockScreen]);
+
+  // Free listeners: leaving the app pauses playback (no automatic resume).
+  useEffect(() => {
+    const subscriptionState = AppState.addEventListener('change', (next) => {
+      if (next !== 'active' && !premiumRef.current && stateRef.current.isPlaying) {
+        player.current?.pause();
+      }
+    });
+    return () => subscriptionState.remove();
+  }, []);
 
   // A different (or no) signed-in user must never inherit the previous session.
   useEffect(() => {
@@ -189,25 +240,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-      if (lockScreenSupported) {
-        try {
-          instance.setActiveForLockScreen(
-            true,
-            {
-              title: `${book.title} · ${chapter.title}`,
-              artist: book.author ?? 'BornoVerse',
-              artworkUrl: resolveMediaUrl(book.cover_image_url),
-            },
-            { showSeekForward: true, showSeekBackward: true },
-          );
-        } catch {}
-      }
+      if (premiumRef.current) applyLockScreen(instance, book, chapter);
 
       if (rate !== 1) instance.setPlaybackRate(rate);
       if (position > 0) instance.seekTo(position).catch(() => {});
       instance.play();
     },
-    [disposePlayer],
+    [disposePlayer, applyLockScreen],
   );
 
   /** Fetch (or renew) signed URLs on the current listening session. */

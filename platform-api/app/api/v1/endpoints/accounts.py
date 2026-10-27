@@ -125,7 +125,11 @@ async def cancel_subscription(db: DatabaseDep, user: MemberDep):
 
 @router.get("/payments")
 async def payments(db: DatabaseDep, user: MemberDep):
-    return [record(r) for r in (await db.scalars(select(Order).where(Order.user_id == user.id).order_by(Order.created_at.desc()).limit(100))).all()]
+    """Payment history: completed payments only. An unfinished or failed attempt
+    is abandoned; paying again starts a new order."""
+    rows = await db.scalars(select(Order).where(Order.user_id == user.id, Order.status == "success")
+                            .order_by(Order.created_at.desc()).limit(100))
+    return [record(r) for r in rows.all()]
 
 @router.post("/payments")
 async def initiate(data: OrderInput, db: DatabaseDep, user: MemberDep):

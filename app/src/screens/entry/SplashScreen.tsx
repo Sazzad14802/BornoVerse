@@ -1,10 +1,13 @@
-import React, { useEffect } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+/**
+ * SplashScreen — full brand-green screen; the white logo fades and scales in,
+ * then the app continues (about 1.3 s, or on tap once it knows where to go).
+ * The native splash uses the same colour and logo, so there is no flash.
+ */
 
-import { AppHeader } from '../../components/AppHeader';
-import { Colors, FontSizes, Radius, Spacing } from '../../theme';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, Pressable, StatusBar, StyleSheet } from 'react-native';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { Colors, FontSizes, Spacing } from '../../theme';
 
 interface SplashScreenProps {
   onContinue: () => void;
@@ -12,117 +15,65 @@ interface SplashScreenProps {
   ready?: boolean;
 }
 
+const INTRO_MS = 700;
+const HOLD_MS = 600;
+
 export function SplashScreen({ onContinue, ready = true }: SplashScreenProps) {
   const { t } = useLanguage();
+  const logo = useRef(new Animated.Value(0)).current;
+  const caption = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(logo, { toValue: 1, duration: INTRO_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(caption, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+  }, [logo, caption]);
 
   useEffect(() => {
     if (!ready) return;
-    const timer = setTimeout(onContinue, 1400);
+    const timer = setTimeout(onContinue, INTRO_MS + HOLD_MS);
     return () => clearTimeout(timer);
   }, [onContinue, ready]);
 
+  const scale = logo.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] });
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <AppHeader
-        title={t('appName')}
-        subtitle={t('appTagline')}
+    <Pressable style={styles.container} onPress={ready ? onContinue : undefined} accessibilityLabel={t('appName')}>
+      <StatusBar barStyle="light-content" backgroundColor={Colors.primary} />
+      <Animated.Image
+        source={require('../../../assets/logo-white.png')}
+        style={[styles.logo, { opacity: logo, transform: [{ scale }] }]}
+        resizeMode="contain"
       />
-
-      <Pressable style={styles.mainContainer} onPress={ready ? onContinue : undefined}>
-        {/* Dark Charcoal Hero Card */}
-        <View style={styles.darkCard}>
-          {/* Official App Logo */}
-          <View style={styles.logoWrapper}>
-            <Image
-              source={require('../../../assets/logo.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-          </View>
-
-          {/* Brand Name */}
-          <Text style={styles.brandTitle}>{t('appName')}</Text>
-
-          {/* Tagline */}
-          <Text style={styles.tagline}>{t('appTagline')}</Text>
-
-          {/* Badge */}
-          <View style={styles.badgeContainer}>
-            <Text style={styles.badgeText}>{t('splashBadge')}</Text>
-          </View>
-        </View>
-      </Pressable>
-
-    </SafeAreaView>
+      <Animated.Text style={[styles.name, { opacity: caption }]}>{t('appName')}</Animated.Text>
+      <Animated.Text style={[styles.tagline, { opacity: caption }]}>{t('appTagline')}</Animated.Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
-    backgroundColor: Colors.background,
-  },
-  mainContainer: {
-    flex: 1,
-    paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
-    justifyContent: 'center',
-  },
-  darkCard: {
-    flex: 1,
-    backgroundColor: Colors.surfaceDark,
-    borderRadius: Radius.xl + 4,
+    backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.xl,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    elevation: 4,
   },
-  logoWrapper: {
-    width: 140,
-    height: 140,
-    borderRadius: Radius.xl,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.lg,
-    backgroundColor: '#FFFFFF',
-    padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.onDarkHairline,
+  logo: {
+    width: 112,
+    height: 112,
   },
-  logoImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: Radius.xl,
-  },
-  brandTitle: {
-    fontSize: FontSizes['3xl'],
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-    marginBottom: Spacing.xs,
+  name: {
+    marginTop: Spacing.lg,
+    fontSize: FontSizes['2xl'],
+    fontWeight: '700',
+    color: Colors.textOnPrimary,
+    letterSpacing: 0.3,
   },
   tagline: {
-    fontSize: FontSizes.sm,
-    color: Colors.textOnDarkSecondary,
-    letterSpacing: 0.2,
-    marginBottom: Spacing.md,
-  },
-  badgeContainer: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.onDarkFill,
     marginTop: Spacing.xs,
-  },
-  badgeText: {
-    fontSize: FontSizes.xs,
-    color: Colors.textOnDark,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    fontSize: FontSizes.sm,
+    color: 'rgba(255, 255, 255, 0.78)',
   },
 });

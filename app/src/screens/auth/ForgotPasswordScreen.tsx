@@ -1,6 +1,5 @@
 /**
- * ForgotPasswordScreen — Password recovery matching Figma Plate 2 Screen 2.
- * 4-step path: Email, Verify, Reset, Success.
+ * ForgotPasswordScreen — password recovery in steps: email, verify, reset, done.
  * Connected to live backend: /api/v1/auth/recovery & /api/v1/auth/reset-password.
  */
 
@@ -9,11 +8,9 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { AuthStackParamList } from '../../navigation/types';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
+import { IconInput } from '../../components/Form';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { apiClient } from '../../api/client';
@@ -36,7 +34,6 @@ export function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   
   const [step, setStep] = useState<1 | 2 | 3>(1); // 1 = Enter Email, 2 = Verify & New Password, 3 = Success
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -135,14 +132,14 @@ export function ForgotPasswordScreen() {
             {step === 1 && (
               <View style={styles.fieldWrapper}>
                 <Text style={styles.fieldLabel}>{t('forgotEmailLabel')}</Text>
-                <TextInput
-                  style={styles.textInput}
+                <IconInput
+                  icon="mail-outline"
                   value={email}
                   onChangeText={setEmail}
-                  placeholder="your-email@example.com"
-                  placeholderTextColor={Colors.textMuted}
+                  placeholder={isEnglish ? 'Email' : 'ইমেইল'}
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  autoComplete="email"
                 />
               </View>
             )}
@@ -151,35 +148,26 @@ export function ForgotPasswordScreen() {
               <>
                 <View style={styles.fieldWrapper}>
                   <Text style={styles.fieldLabel}>{t('forgotVerifyCodeLabel')}</Text>
-                  <TextInput
-                    style={styles.textInput}
+                  <IconInput
+                    icon="key-outline"
                     value={verificationCode}
                     onChangeText={setVerificationCode}
-                    placeholder="Enter recovery code from email"
-                    placeholderTextColor={Colors.textMuted}
+                    placeholder={isEnglish ? 'Code from the email' : 'ইমেইলে পাওয়া কোড'}
                     autoCapitalize="none"
                   />
                 </View>
 
                 <View style={styles.fieldWrapper}>
                   <Text style={styles.fieldLabel}>{t('forgotNewPasswordLabel')}</Text>
-                  <View style={styles.passwordRow}>
-                    <TextInput
-                      style={styles.passwordInput}
-                      value={newPassword}
-                      onChangeText={setNewPassword}
-                      placeholder="Minimum 6 characters"
-                      placeholderTextColor={Colors.textMuted}
-                      secureTextEntry={!showPassword}
-                    />
-                    <Pressable
-                      onPress={() => setShowPassword((prev) => !prev)}
-                      style={styles.eyeButton}
-                      hitSlop={8}
-                    >
-                      <Text style={styles.eyeIcon}>{showPassword ? '👁' : '👁‍🗨'}</Text>
-                    </Pressable>
-                  </View>
+                  <IconInput
+                    icon="lock-closed-outline"
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    placeholder={isEnglish ? 'At least 6 characters' : 'অন্তত ৬ অক্ষর'}
+                    secret
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                  />
                 </View>
               </>
             )}
@@ -318,10 +306,6 @@ const styles = StyleSheet.create({
   },
   eyeButton: {
     padding: Spacing.xs,
-  },
-  eyeIcon: {
-    fontSize: 16,
-    color: Colors.textSecondary,
   },
   errorBanner: {
     backgroundColor: Colors.tintError,

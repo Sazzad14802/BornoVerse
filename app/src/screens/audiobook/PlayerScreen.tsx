@@ -5,7 +5,7 @@
  * playing; premium books the listener can't play show an unlock prompt instead.
  * Without a param (mini player) it shows whatever the PlayerContext has loaded.
  *
- * Artwork, access/genre tags, tap-to-seek progress, ±15s, previous/next chapter,
+ * Artwork, access/genre tags, tap-to-seek progress, ±10s, previous/next chapter,
  * tap-to-cycle speed, then an icon row: Chapters (bottom sheet) · Save · Playlist · Offline · Report.
  */
 
@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
 import { BookCover } from '../../components/BookCover';
@@ -45,6 +45,7 @@ import { offline } from '../../storage/offline';
 import { isPremium } from '../../types/auth';
 import { Playlist } from '../../types/domain';
 import { formatClock, formatDuration } from '../../utils/format';
+import { SEEK_STEP_SECONDS } from '../../config';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
@@ -337,7 +338,7 @@ export function PlayerScreen() {
               {tx('এটি শুনতে প্রিমিয়াম সাবস্ক্রিপশন প্রয়োজন।', 'A Premium subscription is required to listen.')}
             </Text>
             <AppButton
-              label={tx('🔒 প্রিমিয়াম নিয়ে শুনুন', '🔒 Unlock with Premium')}
+              label={tx('প্রিমিয়াম নিয়ে শুনুন', 'Unlock with Premium')}
               onPress={() => goToTab('ProfileTab', { screen: 'Subscription' })}
             />
           </View>
@@ -364,42 +365,53 @@ export function PlayerScreen() {
               <Pressable
                 style={({ pressed }) => [styles.toolButton, !isCurrent && styles.disabled, pressed && styles.pressed]}
                 disabled={!isCurrent}
+                hitSlop={8}
                 onPress={() => run('prev', player.prevChapter)}
+                accessibilityRole="button"
                 accessibilityLabel={tx('আগের অধ্যায়', 'Previous chapter')}
               >
-                <Text style={styles.skipIcon}>⏮</Text>
+                <Ionicons name="play-skip-back" size={26} color={Colors.textPrimary} />
               </Pressable>
               <Pressable
-                style={({ pressed }) => [styles.iconControlButton, pressed && styles.pressed]}
+                style={({ pressed }) => [styles.seekButton, !isCurrent && styles.disabled, pressed && styles.pressed]}
                 disabled={!isCurrent}
-                onPress={() => run('back', () => player.skip(-15))}
-                accessibilityLabel={tx('১৫ সেকেন্ড পিছনে', 'Back 15 seconds')}
+                hitSlop={8}
+                onPress={() => run('back', () => player.skip(-SEEK_STEP_SECONDS))}
+                accessibilityRole="button"
+                accessibilityLabel={tx(`${SEEK_STEP_SECONDS} সেকেন্ড পিছনে`, `Back ${SEEK_STEP_SECONDS} seconds`)}
               >
-                <Text style={styles.rewindIcon}>↺</Text>
-                <Text style={styles.rewindSubText}>15</Text>
+                <MaterialIcons name="replay-10" size={34} color={Colors.textPrimary} />
               </Pressable>
 
               <Pressable
                 style={({ pressed }) => [styles.mainPlayButton, pressed && styles.mainPlayPressed]}
                 onPress={player.togglePlay}
                 disabled={!chapter}
+                accessibilityRole="button"
                 accessibilityLabel={isPlaying && isCurrent ? tx('বিরতি', 'Pause') : tx('চালু করুন', 'Play')}
               >
                 {!chapter || (isLoading && !isPlaying) ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={Colors.textOnPrimary} />
                 ) : (
-                  <Text style={styles.mainPlayIcon}>{isPlaying ? '❚❚' : '▶'}</Text>
+                  <Ionicons
+                    name={isPlaying ? 'pause' : 'play'}
+                    size={32}
+                    color={Colors.textOnPrimary}
+                    // The play triangle looks off-centre without a small optical nudge.
+                    style={isPlaying ? undefined : styles.playGlyph}
+                  />
                 )}
               </Pressable>
 
               <Pressable
-                style={({ pressed }) => [styles.iconControlButton, pressed && styles.pressed]}
+                style={({ pressed }) => [styles.seekButton, !isCurrent && styles.disabled, pressed && styles.pressed]}
                 disabled={!isCurrent}
-                onPress={() => run('forward', () => player.skip(15))}
-                accessibilityLabel={tx('১৫ সেকেন্ড সামনে', 'Forward 15 seconds')}
+                hitSlop={8}
+                onPress={() => run('forward', () => player.skip(SEEK_STEP_SECONDS))}
+                accessibilityRole="button"
+                accessibilityLabel={tx(`${SEEK_STEP_SECONDS} সেকেন্ড সামনে`, `Forward ${SEEK_STEP_SECONDS} seconds`)}
               >
-                <Text style={styles.forwardIcon}>↻</Text>
-                <Text style={styles.forwardSubText}>15</Text>
+                <MaterialIcons name="forward-10" size={34} color={Colors.textPrimary} />
               </Pressable>
               <Pressable
                 style={({ pressed }) => [
@@ -408,10 +420,12 @@ export function PlayerScreen() {
                   pressed && styles.pressed,
                 ]}
                 disabled={!isCurrent || currentChapterIndex + 1 >= chapters.length}
+                hitSlop={8}
                 onPress={() => run('next', player.nextChapter)}
+                accessibilityRole="button"
                 accessibilityLabel={tx('পরের অধ্যায়', 'Next chapter')}
               >
-                <Text style={styles.skipIcon}>⏭</Text>
+                <Ionicons name="play-skip-forward" size={26} color={Colors.textPrimary} />
               </Pressable>
             </View>
 
@@ -421,6 +435,7 @@ export function PlayerScreen() {
               accessibilityRole="button"
               accessibilityLabel={tx(`গতি ${playbackRate}x, বদলাতে চাপুন`, `Speed ${playbackRate}x, tap to change`)}
             >
+              <Ionicons name="speedometer-outline" size={16} color={Colors.textPrimary} />
               <Text style={styles.speedText}>{playbackRate}x</Text>
             </Pressable>
           </>
@@ -470,9 +485,13 @@ export function PlayerScreen() {
                   accessibilityRole="button"
                   accessibilityState={{ selected: current }}
                 >
-                  <Text style={[styles.chapterNumber, current && styles.chapterNumberCurrent]}>
-                    {current ? (isPlaying ? '▶' : '❚❚') : c.chapter_number}
-                  </Text>
+                  <View style={styles.chapterNumberCell}>
+                    {current ? (
+                      <Ionicons name={isPlaying ? 'volume-high' : 'pause'} size={16} color={Colors.primary} />
+                    ) : (
+                      <Text style={styles.chapterNumber}>{c.chapter_number}</Text>
+                    )}
+                  </View>
                   <Text style={[styles.chapterTitle, played && styles.chapterTitlePlayed]} numberOfLines={1}>
                     {c.title}
                   </Text>
@@ -662,50 +681,27 @@ const styles = StyleSheet.create({
     marginVertical: Spacing.md,
   },
   toolButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  skipIcon: {
-    fontSize: 20,
-    color: Colors.textPrimary,
   },
   disabled: {
     opacity: 0.3,
   },
-  iconControlButton: {
-    width: 44,
-    height: 44,
+  seekButton: {
+    width: 52,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rewindIcon: {
-    fontSize: 26,
-    color: Colors.textPrimary,
-  },
-  rewindSubText: {
-    position: 'absolute',
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: Colors.textPrimary,
-    top: 15,
-  },
-  forwardIcon: {
-    fontSize: 26,
-    color: Colors.textPrimary,
-  },
-  forwardSubText: {
-    position: 'absolute',
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: Colors.textPrimary,
-    top: 15,
+  playGlyph: {
+    marginLeft: 3,
   },
   mainPlayButton: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -719,12 +715,10 @@ const styles = StyleSheet.create({
     opacity: 0.85,
     transform: [{ scale: 0.95 }],
   },
-  mainPlayIcon: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
   speedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,
     borderRadius: Radius.full,
@@ -780,15 +774,14 @@ const styles = StyleSheet.create({
   chapterRowCurrent: {
     backgroundColor: Colors.primarySurface,
   },
-  chapterNumber: {
+  chapterNumberCell: {
     width: 24,
+    alignItems: 'center',
+  },
+  chapterNumber: {
     fontSize: FontSizes.sm,
     fontWeight: '700',
     color: Colors.textMuted,
-    textAlign: 'center',
-  },
-  chapterNumberCurrent: {
-    color: Colors.primary,
   },
   chapterTitle: {
     flex: 1,

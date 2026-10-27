@@ -214,7 +214,8 @@ export function GenerationStatusScreen() {
 
         {state === 'COMPLETED' ? (
           <>
-            <AppButton label={tx('▶ শুনুন', '▶ Listen now')} onPress={listen} isLoading={busy === 'listen'} />
+            <AppButton label={tx('শুনুন', 'Listen now')}
+            icon="play" onPress={listen} isLoading={busy === 'listen'} />
           </>
         ) : null}
 

@@ -142,7 +142,7 @@ export function EditAudiobookScreen() {
                 onChange={setTier}
                 options={[
                   { value: 'free', label: tx('ফ্রি', 'Free') },
-                  { value: 'premium', label: tx('⭐ প্রিমিয়াম', '⭐ Premium') },
+                  { value: 'premium', label: tx('প্রিমিয়াম', 'Premium') },
                 ]}
               />
               {data.data?.channels.length ? (

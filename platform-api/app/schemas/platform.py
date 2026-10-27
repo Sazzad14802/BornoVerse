@@ -1,14 +1,21 @@
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 class Decision(Input):
     action: Literal["approve", "reject", "suspend", "unsuspend", "restrict", "restore", "resolve", "dismiss", "complete"]
-    reason: str = Field(min_length=3, max_length=2000)
+    # Only a rejection needs a reason; it is sent to the affected user.
+    reason: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def reason_for_rejection(self):
+        if self.action == "reject" and len(self.reason) < 3:
+            raise ValueError("A reason (at least 3 characters) is required to reject")
+        return self
 
 class ChannelInput(Input):
     name: str = Field(min_length=1, max_length=150)

@@ -1,0 +1,99 @@
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
+index 196a5d5..b2b4969 100644
+--- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
+@@ -90,6 +90,7 @@ class AudioControlsService : MediaSessionService() {
+ 
+         ACTION_SEEK_FORWARD -> currentPlayerRef.seekTo(currentPlayerRef.currentPosition + SEEK_INTERVAL_MS)
+         ACTION_SEEK_BACKWARD -> currentPlayerRef.seekTo(currentPlayerRef.currentPosition - SEEK_INTERVAL_MS)
++        ACTION_NEXT -> skipToEnd(currentPlayerRef)
+       }
+     }
+ 
+@@ -226,6 +227,15 @@ class AudioControlsService : MediaSessionService() {
+             buildActionPendingIntent(ACTION_SEEK_FORWARD)
+           )
+         )
++        currentIndex++
++        // BornoVerse: next chapter (the app advances when the current one ends)
++        builder.addAction(
++          NotificationCompat.Action(
++            androidx.media3.session.R.drawable.media3_icon_next,
++            "Next",
++            buildActionPendingIntent(ACTION_NEXT)
++          )
++        )
+         compactViewIndices.add(currentIndex)
+       }
+ 
+@@ -272,6 +282,15 @@ class AudioControlsService : MediaSessionService() {
+           .setSlots(CommandButton.SLOT_FORWARD)
+           .build()
+       )
++      // BornoVerse: next chapter (the app advances when the current one ends)
++      mediaButtons.add(
++        CommandButton.Builder(CommandButton.ICON_NEXT)
++          .setDisplayName("Next")
++          .setEnabled(true)
++          .setSessionCommand(SessionCommand(ACTION_NEXT, Bundle.EMPTY))
++          .setSlots(CommandButton.SLOT_OVERFLOW)
++          .build()
++      )
+     }
+ 
+     session.setCustomLayout(mediaButtons)
+@@ -510,6 +529,16 @@ class AudioControlsService : MediaSessionService() {
+     notificationManager.cancel(notificationId)
+   }
+ 
++  // BornoVerse: closing the app from recents stops playback and removes the notification.
++  override fun onTaskRemoved(rootIntent: Intent?) {
++    val playerRef = currentPlayer?.ref
++    appContext?.mainQueue?.launch { playerRef?.pause() }
++    stopForeground(STOP_FOREGROUND_REMOVE)
++    hideNotification()
++    stopSelf()
++    super.onTaskRemoved(rootIntent)
++  }
++
+   override fun onDestroy() {
+     super.onDestroy()
+ 
+@@ -559,6 +588,17 @@ class AudioControlsService : MediaSessionService() {
+     const val ACTION_SEEK_FORWARD = "expo.modules.audio.action.SEEK_FORWARD"
+     const val ACTION_SEEK_BACKWARD = "expo.modules.audio.action.SEEK_BACKWARD"
+ 
++    const val ACTION_NEXT = "expo.modules.audio.action.NEXT"
++
+     const val SEEK_INTERVAL_MS = 10000L
++
++    /** Jump to the end so the app's "finished" handler starts the next chapter. */
++    fun skipToEnd(player: Player) {
++      val duration = player.duration
++      if (duration != androidx.media3.common.C.TIME_UNSET && duration > 0) {
++        player.seekTo(duration)
++        player.play()
++      }
++    }
+   }
+ }
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
+index 839aaef..f794912 100644
+--- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioMediaSessionCallback.kt
+@@ -35,6 +35,7 @@ class AudioMediaSessionCallback : MediaSession.Callback {
+           MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+             .add(SessionCommand(AudioControlsService.ACTION_SEEK_BACKWARD, Bundle.EMPTY))
+             .add(SessionCommand(AudioControlsService.ACTION_SEEK_FORWARD, Bundle.EMPTY))
++            .add(SessionCommand(AudioControlsService.ACTION_NEXT, Bundle.EMPTY))
+             .build()
+         )
+         .build()
+@@ -56,6 +57,7 @@ class AudioMediaSessionCallback : MediaSession.Callback {
+       AudioControlsService.ACTION_SEEK_BACKWARD -> {
+         session.player.seekTo(session.player.currentPosition - AudioControlsService.SEEK_INTERVAL_MS)
+       }
++      AudioControlsService.ACTION_NEXT -> AudioControlsService.skipToEnd(session.player)
+     }
+     return super.onCustomCommand(session, controller, command, args)
+   }

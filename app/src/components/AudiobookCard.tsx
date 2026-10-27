@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Audiobook } from '../types/audiobook';
 import { BookCover } from './BookCover';
 import { formatDuration } from '../utils/format';
@@ -83,10 +84,10 @@ export function AudiobookCard({ audiobook, onPress, onPlayPress, progressPercent
           accessibilityRole="button"
           accessibilityLabel={`Play ${audiobook.title}`}
         >
-          <Text style={styles.playIcon}>▶</Text>
+          <Ionicons name="play" size={18} color={Colors.primary} style={styles.playIcon} />
         </Pressable>
       ) : (
-        <Text style={styles.chevron}>›</Text>
+        <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} style={styles.chevron} />
       )}
     </Pressable>
   );
@@ -126,8 +127,6 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.sm,
   },
   chevron: {
-    fontSize: 24,
-    color: Colors.textMuted,
     marginLeft: Spacing.sm,
     paddingHorizontal: Spacing.xs,
   },
@@ -171,8 +170,6 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.96 }],
   },
   playIcon: {
-    color: Colors.primary,
-    fontSize: 16,
     marginLeft: 2, // optical center for play triangle
   },
 });

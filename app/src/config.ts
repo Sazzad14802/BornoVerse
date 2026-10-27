@@ -75,6 +75,9 @@ export const UPLOAD_TIMEOUT_MS = 180_000;
 /** Playback progress sync / listening heartbeat interval. */
 export const PLAYBACK_SYNC_INTERVAL_MS = 10_000;
 
+/** Rewind / fast-forward step, in the app and on the lock screen notification. */
+export const SEEK_STEP_SECONDS = 10;
+
 /** Generation status polling interval. */
 export const GENERATION_POLL_INTERVAL_MS = 4_000;
 

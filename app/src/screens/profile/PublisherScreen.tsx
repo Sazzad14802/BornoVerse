@@ -7,6 +7,7 @@
 
 import React, { useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
@@ -136,7 +137,11 @@ export function PublisherScreen() {
           {[tx('যাচাই', 'Verify'), tx('ফি', 'Fee'), tx('সক্রিয়', 'Active')].map((label, i) => (
             <View key={label} style={styles.step}>
               <View style={[styles.stepDot, i <= stepIndex && styles.stepDotDone]}>
-                <Text style={styles.stepNumber}>{i < stepIndex || active ? '✓' : i + 1}</Text>
+                {i < stepIndex || active ? (
+                  <Ionicons name="checkmark" size={16} color={Colors.textOnPrimary} />
+                ) : (
+                  <Text style={styles.stepNumber}>{i + 1}</Text>
+                )}
               </View>
               <Text style={styles.stepLabel}>{label}</Text>
             </View>
@@ -172,7 +177,7 @@ export function PublisherScreen() {
             </Text>
             <Field label={tx('আইনি নাম', 'Legal name')} required value={legalName} onChangeText={setLegalName} maxLength={150} />
             <AppButton
-              label={document ? `📄 ${document.name}` : tx('📄 PDF বেছে নিন', '📄 Choose PDF')}
+              label={document ? document.name : tx('PDF বেছে নিন', 'Choose PDF')}
               variant="secondary"
               onPress={chooseDocument}
             />
@@ -182,7 +187,7 @@ export function PublisherScreen() {
 
         {status === 'approved_pending_payment' ? (
           <FormCard>
-            <Text style={styles.cardTitle}>{tx('🎉 আবেদন অনুমোদিত', '🎉 Application approved')}</Text>
+            <Text style={styles.cardTitle}>{tx('আবেদন অনুমোদিত', 'Application approved')}</Text>
             <Text style={styles.cardText}>
               {tx('এককালীন নিবন্ধন ফি দিলেই প্রকাশনা শুরু করতে পারবেন।', 'Pay the one-time registration fee to start publishing.')}
             </Text>

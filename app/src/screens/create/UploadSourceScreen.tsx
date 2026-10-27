@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -95,7 +96,11 @@ export function UploadSourceScreen() {
           disabled={stage !== 'idle'}
           accessibilityRole="button"
         >
-          <Text style={styles.dropIcon}>{file ? '✓' : '📄'}</Text>
+          <Ionicons
+            name={file ? 'checkmark-circle' : 'document-text-outline'}
+            size={34}
+            color={file ? Colors.success : Colors.primary}
+          />
           <Text style={styles.dropTitle} numberOfLines={2}>
             {file ? file.name : tx('PDF ফাইল বেছে নিন', 'Choose a PDF')}
           </Text>
@@ -167,9 +172,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
-  },
-  dropIcon: {
-    fontSize: 30,
   },
   dropTitle: {
     fontSize: FontSizes.base,

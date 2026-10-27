@@ -185,7 +185,7 @@ export function CreateAudiobookScreen() {
           </Text>
 
           <AppButton
-            label={tx('পরবর্তী: ফাইল আপলোড →', 'Next: upload file →')}
+            label={tx('পরবর্তী: ফাইল আপলোড', 'Next: upload file')}
             onPress={submit}
             isLoading={submitting}
             disabled={quotaFull}

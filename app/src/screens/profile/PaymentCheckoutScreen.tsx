@@ -1,10 +1,13 @@
 /**
  * PaymentCheckoutScreen — pays one server-priced order through SSLCommerz and
  * shows the verified result. Development mock orders get explicit test buttons.
+ * An attempt that fails or is cancelled is abandoned: "Try again" starts a new
+ * order for the same product, so history only ever shows completed payments.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -18,7 +21,7 @@ import { useAppNavigation } from '../../navigation/useAppNavigation';
 import { ProfileStackParamList } from '../../navigation/types';
 import { CheckoutOutcome, runHostedCheckout } from '../../services/checkout';
 import { PaymentOrder } from '../../types/domain';
-import { formatMoney } from '../../utils/format';
+import { formatMoney, newIdempotencyKey } from '../../utils/format';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
 type Phase = 'loading' | 'paying' | 'mock' | 'done' | 'error';
@@ -81,6 +84,23 @@ export function PaymentCheckoutScreen() {
       });
   }, [orderId, pay, finish]);
 
+  /** Abandon this attempt and pay the same product with a fresh order. */
+  const startOver = async () => {
+    if (!order) return;
+    setPhase('loading');
+    setOutcome(null);
+    setError('');
+    try {
+      const fresh = await paymentsApi.initiate(order.kind, newIdempotencyKey(), order.plan_id ?? undefined);
+      setOrder(fresh);
+      if (fresh.provider === 'mock') setPhase('mock');
+      else await pay(fresh);
+    } catch (e) {
+      setError(errorMessage(e));
+      setPhase('error');
+    }
+  };
+
   const mockSettle = async (status: 'success' | 'failed') => {
     try {
       await finish(await paymentsApi.mockConfirm(orderId, status), status);
@@ -132,7 +152,11 @@ export function PaymentCheckoutScreen() {
 
         {phase === 'done' && order ? (
           <View style={[styles.card, succeeded ? styles.cardSuccess : styles.cardFailed]}>
-            <Text style={styles.resultIcon}>{succeeded ? '✓' : outcome === 'pending' ? '…' : '×'}</Text>
+            <Ionicons
+              name={succeeded ? 'checkmark-circle' : outcome === 'pending' ? 'time-outline' : 'close-circle'}
+              size={44}
+              color={succeeded ? Colors.success : outcome === 'pending' ? Colors.warning : Colors.error}
+            />
             <Text style={styles.cardTitle}>
               {succeeded
                 ? tx('পেমেন্ট সফল হয়েছে', 'Payment successful')
@@ -153,7 +177,7 @@ export function PaymentCheckoutScreen() {
               <AppButton label={tx('ঠিক আছে', 'Done')} onPress={() => navigation.goBack()} />
             ) : (
               <>
-                <AppButton label={tx('আবার চেষ্টা করুন', 'Try again')} onPress={() => pay(order)} />
+                <AppButton label={tx('আবার চেষ্টা করুন', 'Try again')} onPress={startOver} />
                 <AppButton label={tx('পরে', 'Later')} variant="secondary" onPress={() => navigation.goBack()} />
               </>
             )}
@@ -164,11 +188,14 @@ export function PaymentCheckoutScreen() {
           <View style={[styles.card, styles.cardFailed]}>
             <Text style={styles.cardTitle}>{tx('পেমেন্ট শুরু করা যায়নি', 'Could not start payment')}</Text>
             <Text style={styles.meta}>{error}</Text>
-            {order ? <AppButton label={tx('আবার চেষ্টা করুন', 'Try again')} onPress={() => pay(order)} /> : null}
+            {order ? <AppButton label={tx('আবার চেষ্টা করুন', 'Try again')} onPress={startOver} /> : null}
           </View>
         ) : null}
 
-        <Text style={styles.secure}>🔒 {tx('SSLCommerz-এর মাধ্যমে নিরাপদ পেমেন্ট', 'Secured by SSLCommerz')}</Text>
+        <View style={styles.secureRow}>
+          <Ionicons name="lock-closed" size={13} color={Colors.textMuted} />
+          <Text style={styles.secure}>{tx('SSLCommerz-এর মাধ্যমে নিরাপদ পেমেন্ট', 'Secured by SSLCommerz')}</Text>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -229,19 +256,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.tintError,
     borderColor: Colors.tintError,
   },
-  resultIcon: {
-    fontSize: 34,
-    textAlign: 'center',
-    color: Colors.textPrimary,
-  },
   cardTitle: {
     fontSize: FontSizes.lg,
     fontWeight: '700',
     color: Colors.textPrimary,
     textAlign: 'center',
   },
+  secureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
   secure: {
-    textAlign: 'center',
     fontSize: FontSizes.xs,
     color: Colors.textMuted,
   },

@@ -1,13 +1,17 @@
 /**
- * AppButton — Buttons matching Figma designs.
- * Supports primary (terracotta), secondary outline, Google sign-in, and loading states.
+ * AppButton — the app's one button component.
+ *
+ * Variants: primary (filled brand green), secondary / outline (white, bordered),
+ * google (white, bordered, official "G" mark), compact (smaller primary) and
+ * text (borderless link). An optional leading Ionicon; loading shows a spinner.
  */
 
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, FontSizes, Radius, Spacing } from '../theme';
 
-export type AppButtonVariant = 'primary' | 'secondary' | 'google' | 'outline' | 'compact';
+export type AppButtonVariant = 'primary' | 'secondary' | 'google' | 'outline' | 'compact' | 'text';
 
 interface AppButtonProps {
   label: string;
@@ -16,7 +20,7 @@ interface AppButtonProps {
   disabled?: boolean;
   isLoading?: boolean;
   fullWidth?: boolean;
-  bulletPrefix?: boolean;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
 }
 
 export function AppButton({
@@ -26,12 +30,11 @@ export function AppButton({
   disabled = false,
   isLoading = false,
   fullWidth = true,
-  bulletPrefix = false,
+  icon,
 }: AppButtonProps) {
-  const isPrimary = variant === 'primary' || variant === 'compact';
-  const isGoogle = variant === 'google';
-  const isSecondary = variant === 'secondary' || variant === 'outline';
-  const isCompact = variant === 'compact';
+  const filled = variant === 'primary' || variant === 'compact';
+  const bordered = variant === 'secondary' || variant === 'outline' || variant === 'google';
+  const foreground = filled ? Colors.textOnPrimary : variant === 'text' ? Colors.primary : Colors.textPrimary;
 
   return (
     <Pressable
@@ -40,32 +43,31 @@ export function AppButton({
       style={({ pressed }) => [
         styles.base,
         fullWidth && styles.fullWidth,
-        isCompact && styles.compact,
-        isPrimary && styles.primary,
-        isSecondary && styles.secondary,
-        isGoogle && styles.google,
-        disabled && styles.disabled,
-        pressed && styles.pressed,
+        variant === 'compact' && styles.compact,
+        variant === 'text' && styles.text,
+        filled && styles.filled,
+        filled && pressed && styles.filledPressed,
+        bordered && styles.bordered,
+        bordered && pressed && styles.borderedPressed,
+        variant === 'text' && pressed && styles.textPressed,
+        (disabled || isLoading) && styles.disabled,
       ]}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: disabled || isLoading, busy: isLoading }}
     >
       {isLoading ? (
-        <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
-          <Text style={styles.primaryText}>Loading...</Text>
-        </View>
+        <ActivityIndicator size="small" color={foreground} />
       ) : (
-        <View style={styles.contentRow}>
-          {isGoogle && <Text style={styles.bulletDot}>•</Text>}
-          {bulletPrefix && !isGoogle && <Text style={styles.bulletDot}>•</Text>}
+        <View style={styles.content}>
+          {variant === 'google' ? (
+            <Image source={require('../../assets/google-g.png')} style={styles.googleMark} />
+          ) : icon ? (
+            <Ionicons name={icon} size={variant === 'compact' ? 16 : 18} color={foreground} />
+          ) : null}
           <Text
-            style={[
-              isPrimary && styles.primaryText,
-              isSecondary && styles.secondaryText,
-              isGoogle && styles.googleText,
-              isCompact && styles.compactText,
-            ]}
+            style={[styles.label, variant === 'compact' && styles.compactLabel, { color: foreground }]}
+            numberOfLines={1}
           >
             {label}
           </Text>
@@ -77,8 +79,8 @@ export function AppButton({
 
 const styles = StyleSheet.create({
   base: {
-    height: 52,
-    borderRadius: Radius.lg,
+    height: 50,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.lg,
@@ -87,68 +89,50 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   compact: {
-    height: 44,
+    height: 40,
     paddingHorizontal: Spacing.md,
-    borderRadius: Radius.md,
+    borderRadius: Radius.sm + 2,
   },
-  primary: {
+  text: {
+    height: 40,
+    paddingHorizontal: Spacing.sm,
+  },
+  filled: {
     backgroundColor: Colors.primary,
   },
-  secondary: {
+  filledPressed: {
+    backgroundColor: Colors.primaryDark,
+  },
+  bordered: {
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
   },
-  google: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+  borderedPressed: {
+    backgroundColor: Colors.surfaceElevated,
+  },
+  textPressed: {
+    opacity: 0.6,
   },
   disabled: {
     opacity: 0.5,
   },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.99 }],
-  },
-  contentRow: {
+  content: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.sm,
   },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  googleMark: {
+    width: 18,
+    height: 18,
   },
-  bulletDot: {
-    fontSize: 16,
-    color: Colors.textPrimary,
-    marginRight: 6,
-    lineHeight: 18,
-  },
-  primaryText: {
-    color: '#FFFFFF',
-    fontSize: FontSizes.base,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  secondaryText: {
-    color: Colors.textPrimary,
+  label: {
     fontSize: FontSizes.base,
     fontWeight: '600',
+    letterSpacing: 0.1,
   },
-  googleText: {
-    color: Colors.textPrimary,
-    fontSize: FontSizes.base,
-    fontWeight: '600',
-  },
-  compactText: {
+  compactLabel: {
     fontSize: FontSizes.sm,
   },
 });

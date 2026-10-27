@@ -58,8 +58,11 @@ export interface AudiobookListResponse {
   pages: number;
 }
 
+export type CatalogSort = 'newest' | 'oldest' | 'title' | 'shortest' | 'longest';
+
 export interface AudiobookQuery {
   q?: string;
+  sort?: CatalogSort;
   genre?: string;
   language?: string;
   access_tier?: AccessTier;

@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AudiobookCard } from '../../components/AudiobookCard';
@@ -161,12 +162,12 @@ export function LibraryScreen() {
               onPress={() => navigation.navigate('PlaylistDetails', { playlistId: item.id, name: item.name })}
             >
               <View style={styles.playlistIcon}>
-                <Text style={styles.playlistIconText}>♫</Text>
+                <Ionicons name="musical-notes-outline" size={22} color={Colors.tintBlueText} />
               </View>
               <Text style={styles.playlistName} numberOfLines={1}>
                 {item.name}
               </Text>
-              <Text style={styles.chevron}>›</Text>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
             </Pressable>
           )}
         />
@@ -254,19 +255,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playlistIconText: {
-    fontSize: 22,
-    color: Colors.tintBlueText,
-  },
   playlistName: {
     flex: 1,
     fontSize: FontSizes.base,
     fontWeight: '700',
     color: Colors.textPrimary,
-  },
-  chevron: {
-    fontSize: 24,
-    color: Colors.textMuted,
   },
   sheet: {
     gap: Spacing.md,

@@ -1,11 +1,54 @@
 /**
  * Form primitives shared by create/edit/publisher forms:
- * a labelled text field, a segmented option picker and a form card.
+ * a labelled text field, an icon input (sign-in forms), a segmented option
+ * picker and a form card.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors, FontSizes, Radius, Spacing } from '../theme';
+
+interface IconInputProps extends TextInputProps {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  /** Password field: hides the text and adds a show/hide toggle. */
+  secret?: boolean;
+}
+
+/** Text input with a leading icon; the border turns brand green while focused. */
+export function IconInput({ icon, secret, style, onFocus, onBlur, ...input }: IconInputProps) {
+  const [focused, setFocused] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <View style={[styles.iconInput, focused && styles.iconInputFocused, style as ViewStyle]}>
+      <Ionicons name={icon} size={20} color={focused ? Colors.primary : Colors.textMuted} />
+      <TextInput
+        {...input}
+        style={styles.iconInputText}
+        placeholderTextColor={Colors.textMuted}
+        secureTextEntry={secret && !revealed}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
+      />
+      {secret ? (
+        <Pressable
+          onPress={() => setRevealed((v) => !v)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={revealed ? 'Hide password' : 'Show password'}
+        >
+          <Ionicons name={revealed ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.textMuted} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 interface FieldProps extends TextInputProps {
   label: string;
@@ -79,6 +122,26 @@ export function FormCard({ children, style }: { children: React.ReactNode; style
 }
 
 const styles = StyleSheet.create({
+  iconInput: {
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    borderRadius: Radius.md,
+  },
+  iconInputFocused: {
+    borderColor: Colors.primary,
+  },
+  iconInputText: {
+    flex: 1,
+    height: '100%',
+    fontSize: FontSizes.base,
+    color: Colors.textPrimary,
+  },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,

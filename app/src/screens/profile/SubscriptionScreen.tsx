@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
@@ -80,9 +81,6 @@ export function SubscriptionScreen() {
       ],
     );
 
-  const statusLabel = (status: string) =>
-    ({ success: tx('সফল', 'Paid'), pending: tx('অসম্পূর্ণ', 'Pending'), failed: tx('ব্যর্থ', 'Failed'), cancelled: tx('বাতিল', 'Cancelled') })[status] ?? status;
-
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <AppHeader title={tx('প্রিমিয়াম', 'Premium')} onBack={() => navigation.goBack()} />
@@ -92,7 +90,7 @@ export function SubscriptionScreen() {
       >
         {premium ? (
           <View style={styles.activeCard}>
-            <Text style={styles.activeTitle}>{tx('প্রিমিয়াম সক্রিয় ✨', 'Premium is active ✨')}</Text>
+            <Text style={styles.activeTitle}>{tx('প্রিমিয়াম সক্রিয়', 'Premium is active')}</Text>
             <Text style={styles.activeText}>
               {tx(`মেয়াদ: ${formatDate(user?.premium_until, false)}`, `Valid until ${formatDate(user?.premium_until, true)}`)}
             </Text>
@@ -103,9 +101,10 @@ export function SubscriptionScreen() {
         ) : (
           <View style={styles.benefits}>
             {BENEFITS.map((b) => (
-              <Text key={b.en} style={styles.benefit}>
-                ✓ {isEnglish ? b.en : b.bn}
-              </Text>
+              <View key={b.en} style={styles.benefitRow}>
+                <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+                <Text style={styles.benefit}>{isEnglish ? b.en : b.bn}</Text>
+              </View>
             ))}
           </View>
         )}
@@ -160,20 +159,20 @@ export function SubscriptionScreen() {
               <View style={styles.history}>
                 <Text style={styles.historyTitle}>{tx('পেমেন্ট ইতিহাস', 'Payment history')}</Text>
                 {data.data.payments.map((p) => (
-                  <Pressable
-                    key={p.id}
-                    style={styles.historyRow}
-                    disabled={p.status !== 'pending'}
-                    onPress={() => navigation.navigate('PaymentCheckout', { orderId: p.id })}
-                  >
+                  <View key={p.id} style={styles.historyRow}>
+                    <View style={styles.historyIcon}>
+                      <Ionicons name="receipt-outline" size={18} color={Colors.primary} />
+                    </View>
                     <View style={styles.planText}>
                       <Text style={styles.historyName}>
-                        {p.kind === 'subscription' ? tx('প্রিমিয়াম', 'Premium') : tx('প্রকাশক ফি', 'Publisher fee')} · {formatMoney(p.amount)}
+                        {p.kind === 'subscription'
+                          ? tx(`প্রিমিয়াম · ${p.months} মাস`, `Premium · ${p.months} month${p.months > 1 ? 's' : ''}`)
+                          : tx('প্রকাশক নিবন্ধন ফি', 'Publisher registration fee')}
                       </Text>
-                      <Text style={styles.planMeta}>{formatDate(p.created_at, isEnglish)}</Text>
+                      <Text style={styles.planMeta}>{formatDate(p.updated_at, isEnglish)}</Text>
                     </View>
-                    <TagBadge label={statusLabel(p.status)} variant={p.status === 'success' ? 'free' : p.status === 'pending' ? 'premium' : 'offline'} />
-                  </Pressable>
+                    <Text style={styles.historyAmount}>{formatMoney(p.amount)}</Text>
+                  </View>
                 ))}
               </View>
             ) : null}
@@ -218,7 +217,13 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     gap: Spacing.sm,
   },
+  benefitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   benefit: {
+    flex: 1,
     fontSize: FontSizes.base,
     color: Colors.textPrimary,
   },
@@ -300,6 +305,19 @@ const styles = StyleSheet.create({
   historyName: {
     fontSize: FontSizes.sm,
     fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  historyIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.sm + 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primarySurface,
+  },
+  historyAmount: {
+    fontSize: FontSizes.sm,
+    fontWeight: '700',
     color: Colors.textPrimary,
   },
 });

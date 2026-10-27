@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from './AppButton';
 import { Colors, FontSizes, Radius, Spacing } from '../theme';
 
@@ -29,7 +30,11 @@ export function StateView({ kind, title, message, actionLabel, onAction, compact
 
   return (
     <View style={[styles.container, styles.card, compact && styles.compact]}>
-      <Text style={styles.icon}>{kind === 'error' ? '⚠︎' : '○'}</Text>
+      <Ionicons
+        name={kind === 'error' ? 'alert-circle-outline' : 'file-tray-outline'}
+        size={30}
+        color={kind === 'error' ? Colors.tintErrorText : Colors.textMuted}
+      />
       {title ? <Text style={styles.title}>{title}</Text> : null}
       {message ? <Text style={styles.message}>{message}</Text> : null}
       {actionLabel && onAction ? (
@@ -57,10 +62,6 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
-  },
-  icon: {
-    fontSize: 22,
-    color: Colors.textMuted,
   },
   title: {
     fontSize: FontSizes.base,
