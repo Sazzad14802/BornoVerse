@@ -6,7 +6,7 @@ from app.api.deps import DatabaseDep, MemberDep, ActivePublisherDep
 from app.models import User, Audiobook, PlaybackProgress
 from app.models.platform import (PublisherApplication, Channel, Plan, Order, Withdrawal, Ledger,
     EligibleView, Report, Playlist, PlaylistBook, Quota)
-from app.schemas.platform import ChannelInput, OrderInput, CallbackInput, WithdrawalInput, ReportInput, ProfileInput
+from app.schemas.platform import ChannelInput, PlaylistInput, OrderInput, CallbackInput, WithdrawalInput, ReportInput, ProfileInput
 from app.schemas.user import UserRead
 from app.services.policy import audit, configuration, is_publisher, month_now, premium
 from app.services.storage_service import get_storage_service
@@ -98,6 +98,9 @@ async def channels(db: DatabaseDep, user: MemberDep):
 
 @router.post("/publisher/channels")
 async def channel_create(data: ChannelInput, db: DatabaseDep, user: ActivePublisherDep):
+    # One channel per publisher (like a YouTube channel); playlists organise it.
+    if await db.scalar(select(Channel.id).where(Channel.owner_id == user.id)):
+        raise HTTPException(409, "You already have a channel")
     row = Channel(owner_id=user.id, **data.model_dump())
     db.add(row)
     await db.commit()
@@ -167,28 +170,33 @@ async def quota(db: DatabaseDep, user: MemberDep):
     row = await db.get(Quota, (user.id, month_now()))
     return {"used": row.used if row else 0, "limit": policy[tier + "_quota"], "plan": tier, "month": month_now()}
 
-@router.post("/reports")
-async def report(data: ReportInput, db: DatabaseDep, user: MemberDep):
-    await get_audiobook_for_user(db, data.audiobook_id, user)
-    row = Report(user_id=user.id, **data.model_dump())
-    db.add(row)
-    await db.commit()
-    return record(row)
-
 @router.get("/history")
 async def history(db: DatabaseDep, user: MemberDep):
     return [record(r) for r in (await db.scalars(select(PlaybackProgress).where(PlaybackProgress.user_id == user.id).order_by(PlaybackProgress.updated_at.desc()).limit(100))).all()]
 
 @router.get("/playlists")
-async def playlists(db: DatabaseDep, user: MemberDep):
-    return [record(r) for r in (await db.scalars(select(Playlist).where(Playlist.user_id == user.id))).all()]
+async def playlists(db: DatabaseDep, user: MemberDep, scope: str = "personal"):
+    """scope=personal: the listener's own playlists; scope=channel: their channel's playlists."""
+    channel_filter = Playlist.channel_id.is_not(None) if scope == "channel" else Playlist.channel_id.is_(None)
+    rows = (await db.scalars(select(Playlist).where(Playlist.user_id == user.id, channel_filter)
+                             .order_by(Playlist.created_at))).all()
+    counts = dict((await db.execute(select(PlaylistBook.playlist_id, func.count()).where(
+        PlaylistBook.playlist_id.in_([r.id for r in rows])).group_by(PlaylistBook.playlist_id))).all()) if rows else {}
+    return [{**record(r), "count": counts.get(r.id, 0)} for r in rows]
 
 @router.post("/playlists")
-async def playlist_create(data: ChannelInput, db: DatabaseDep, user: MemberDep):
-    row = Playlist(user_id=user.id, name=data.name)
+async def playlist_create(data: PlaylistInput, db: DatabaseDep, user: MemberDep):
+    channel_id = None
+    if data.channel:
+        if not is_publisher(user):
+            raise HTTPException(403, "Publisher verification is required")
+        channel_id = await db.scalar(select(Channel.id).where(Channel.owner_id == user.id))
+        if not channel_id:
+            raise HTTPException(409, "Create your channel first")
+    row = Playlist(user_id=user.id, name=data.name, channel_id=channel_id)
     db.add(row)
     await db.commit()
-    return record(row)
+    return {**record(row), "count": 0}
 
 async def owned_playlist(db, id, user):
     row = await db.get(Playlist, id)
@@ -219,8 +227,10 @@ async def playlist_books(id: UUID, db: DatabaseDep, user: MemberDep):
 
 @router.put("/playlists/{id}/books/{book_id}")
 async def playlist_add(id: UUID, book_id: UUID, db: DatabaseDep, user: MemberDep):
-    await owned_playlist(db, id, user)
-    await get_audiobook_for_user(db, book_id, user)
+    playlist = await owned_playlist(db, id, user)
+    book = await get_audiobook_for_user(db, book_id, user)
+    if playlist.channel_id and book.channel_id != playlist.channel_id:
+        raise HTTPException(409, "Only audiobooks in your channel can be added to a channel playlist")
     if not await db.get(PlaylistBook, (id, book_id)):
         db.add(PlaylistBook(playlist_id=id, audiobook_id=book_id))
         await db.commit()

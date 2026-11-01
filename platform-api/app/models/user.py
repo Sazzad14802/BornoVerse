@@ -49,6 +49,8 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     full_name: Mapped[Optional[str]] = mapped_column(String(150))
     premium_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     subscription_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Mirror of the latest active publishing restriction; expires on its own.
+    publishing_restricted_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),

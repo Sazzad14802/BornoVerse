@@ -102,6 +102,7 @@ async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notificatio
             "body": n.body,
             "sound": "default",
             "channelId": "default",
+            "priority": "high",
             "data": {**n.data, "notification_id": str(n.id), "kind": n.kind},
         }
         for n in rows

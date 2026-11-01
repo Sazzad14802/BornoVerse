@@ -15,6 +15,7 @@ from app.core.config import settings
 
 
 COVER_MAX_BYTES = 5 * 1024 * 1024
+EVIDENCE_MAX_BYTES = 10 * 1024 * 1024
 
 
 def image_extension(data: bytes) -> Optional[str]:
@@ -145,6 +146,25 @@ class LocalStorageService(BaseStorageService):
         (target_dir / name).write_bytes(data)
         return name
 
+    async def save_evidence(self, file: UploadFile) -> tuple[str, str]:
+        """Store a private moderation document (PDF, JPEG, PNG or WebP, max 10 MB).
+        Returns its storage key and content type."""
+        data = await file.read(EVIDENCE_MAX_BYTES + 1)
+        if len(data) > EVIDENCE_MAX_BYTES:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Evidence file exceeds 10MB")
+        if data.startswith(b"%PDF-"):
+            extension, content_type = ".pdf", "application/pdf"
+        else:
+            extension = image_extension(data)
+            if not extension:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence must be a PDF or a JPEG, PNG or WebP image")
+            content_type = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}[extension]
+        target_dir = self.base_dir / "evidence"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        name = f"{uuid.uuid4()}{extension}"
+        (target_dir / name).write_bytes(data)
+        return f"/uploads/evidence/{name}", content_type
+
     async def get_file_path(self, file_url_or_key: str) -> Optional[str]:
         clean_key = file_url_or_key.lstrip("/")
         if clean_key.startswith("uploads/"):
@@ -212,6 +232,11 @@ class SupabaseStorageService(LocalStorageService):
         name = await super().save_cover_image(file)
         await self.persist(f"/uploads/covers/{name}")
         return name
+
+    async def save_evidence(self, file: UploadFile) -> tuple[str, str]:
+        key, content_type = await super().save_evidence(file)
+        await self.persist(key)
+        return key, content_type
 
     async def get_file_path(self, file_url_or_key: str) -> Optional[str]:
         import httpx

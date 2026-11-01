@@ -34,7 +34,9 @@ import { PublisherScreen } from '../screens/profile/PublisherScreen';
 import { ChannelScreen } from '../screens/profile/ChannelScreen';
 import { MyAudiobooksScreen } from '../screens/profile/MyAudiobooksScreen';
 import { EditAudiobookScreen } from '../screens/profile/EditAudiobookScreen';
+import { AccountStatusScreen } from '../screens/profile/AccountStatusScreen';
 import { PlayerScreen } from '../screens/audiobook/PlayerScreen';
+import { ChannelProfileScreen } from '../screens/channel/ChannelProfileScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
@@ -54,6 +56,7 @@ function withSharedScreens(Stack: any) {
       <Stack.Screen name="GenerationStatus" component={GenerationStatusScreen} />
       <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen name="ChannelProfile" component={ChannelProfileScreen} />
     </>
   );
 }
@@ -111,6 +114,7 @@ function ProfileStackNavigator() {
       <ProfileStack.Screen name="Channel" component={ChannelScreen} />
       <ProfileStack.Screen name="MyAudiobooks" component={MyAudiobooksScreen} />
       <ProfileStack.Screen name="EditAudiobook" component={EditAudiobookScreen} />
+      <ProfileStack.Screen name="AccountStatus" component={AccountStatusScreen} />
       {withSharedScreens(ProfileStack)}
     </ProfileStack.Navigator>
   );

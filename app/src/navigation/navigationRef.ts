@@ -14,7 +14,9 @@ export function openNotificationTarget(data: Record<string, unknown> | undefined
   const kind = String(data.kind ?? '');
   const audiobookId = data.audiobook_id ? String(data.audiobook_id) : undefined;
 
-  if (kind.startsWith('generation.') && audiobookId) {
+  if (kind === 'channel.new_audiobook' && audiobookId) {
+    navigationRef.navigate('HomeTab', { screen: 'Player', params: { audiobookId } } as any);
+  } else if (kind.startsWith('generation.') && audiobookId) {
     navigationRef.navigate('LibraryTab', {
       screen: kind === 'generation.completed' ? 'Player' : 'GenerationStatus',
       params: { audiobookId },
@@ -24,7 +26,7 @@ export function openNotificationTarget(data: Record<string, unknown> | undefined
   } else if (kind.startsWith('publisher.') || kind.startsWith('withdrawal.')) {
     navigationRef.navigate('ProfileTab', { screen: 'Publisher' } as any);
   } else if (kind.startsWith('moderation.')) {
-    navigationRef.navigate('ProfileTab', { screen: 'MyAudiobooks' } as any);
+    navigationRef.navigate('ProfileTab', { screen: 'AccountStatus' } as any);
   } else {
     navigationRef.navigate('HomeTab', { screen: 'Notifications' } as any);
   }

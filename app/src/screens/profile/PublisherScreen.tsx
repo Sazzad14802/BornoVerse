@@ -1,8 +1,9 @@
 /**
- * PublisherScreen — any user can become a publisher here:
- * 1. submit verification (legal name + PDF) → 2. admin review →
- * 3. pay the registration fee → 4. studio: channels, earnings, withdrawals.
- * Publishing itself happens inside a channel (see ChannelScreen).
+ * PublisherScreen — the publisher room. Any user (free or premium) can apply:
+ * 1. submit verification (legal name + PDF), 2. admin review,
+ * 3. pay the registration fee, 4. create the one channel, then manage it,
+ *    earnings and withdrawals here. Publishing happens in the channel
+ *    (ChannelScreen), organised with playlists.
  */
 
 import React, { useState } from 'react';
@@ -51,7 +52,6 @@ export function PublisherScreen() {
   const [legalName, setLegalName] = useState(user?.full_name ?? '');
   const [document, setDocument] = useState<PickedFile | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [channelSheet, setChannelSheet] = useState(false);
   const [channelName, setChannelName] = useState('');
   const [channelDescription, setChannelDescription] = useState('');
   const [withdrawSheet, setWithdrawSheet] = useState(false);
@@ -97,17 +97,10 @@ export function PublisherScreen() {
 
   const openChannel = (channel: Channel) => navigation.navigate('Channel', { channelId: channel.id });
 
-  const newChannel = () => {
-    setChannelName('');
-    setChannelDescription('');
-    setChannelSheet(true);
-  };
-
   const createChannel = () =>
     run('channel', async () => {
       if (!channelName.trim()) throw new Error(tx('চ্যানেলের নাম দিন।', 'Enter a channel name.'));
       const channel = await publisherApi.createChannel(channelName.trim(), channelDescription.trim());
-      setChannelSheet(false);
       await data.reload();
       openChannel(channel);
     });
@@ -125,6 +118,7 @@ export function PublisherScreen() {
     });
 
   const dashboard = data.data?.dashboard;
+  const myChannel = data.data?.channels[0];
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -199,7 +193,31 @@ export function PublisherScreen() {
           </FormCard>
         ) : null}
 
-        {active && dashboard ? (
+        {active && data.data && !myChannel ? (
+          <FormCard>
+            <View style={styles.createIcon}>
+              <Ionicons name="radio-outline" size={26} color={Colors.primary} />
+            </View>
+            <Text style={styles.cardTitle}>{tx('আপনার চ্যানেল তৈরি করুন', 'Create your channel')}</Text>
+            <Text style={styles.cardText}>
+              {tx(
+                'প্রতিটি প্রকাশকের একটি চ্যানেল থাকে। শ্রোতারা এটি ফলো করবে, আর আপনি প্লেলিস্ট দিয়ে অডিওবুক সাজাবেন।',
+                'Every publisher has one channel. Listeners follow it, and you organise your audiobooks with playlists.',
+              )}
+            </Text>
+            <Field label={tx('চ্যানেলের নাম', 'Channel name')} required value={channelName} onChangeText={setChannelName} maxLength={150} />
+            <Field
+              label={tx('বিবরণ', 'Description')}
+              value={channelDescription}
+              onChangeText={setChannelDescription}
+              multiline
+              maxLength={5000}
+            />
+            <AppButton label={tx('চ্যানেল তৈরি করুন', 'Create channel')} onPress={createChannel} isLoading={busy === 'channel'} />
+          </FormCard>
+        ) : null}
+
+        {active && dashboard && myChannel ? (
           <>
             <View style={styles.statsGrid}>
               <View style={styles.statBox}>
@@ -221,25 +239,28 @@ export function PublisherScreen() {
               disabled={Number(dashboard.available_balance) <= 0}
             />
 
-            <FormCard style={styles.list}>
-              <View style={styles.listHeader}>
-                <Text style={styles.cardTitle}>{tx('চ্যানেল', 'Channels')}</Text>
-                <AppButton label={tx('+ নতুন', '+ New')} variant="compact" fullWidth={false} onPress={newChannel} />
-              </View>
-              {data.data?.channels.length ? (
-                data.data.channels.map((c, i, all) => (
-                  <ListRow
-                    key={c.id}
-                    title={c.name}
-                    subtitle={c.moderated ? tx('অ্যাডমিন সীমিত করেছেন', 'Restricted by admin') : c.description || undefined}
-                    onPress={() => openChannel(c)}
-                    last={i === all.length - 1}
-                  />
-                ))
-              ) : (
-                <Text style={styles.cardText}>{tx('প্রকাশ করতে প্রথমে একটি চ্যানেল খুলুন।', 'Create a channel to start publishing.')}</Text>
-              )}
-            </FormCard>
+            {myChannel ? (
+              <FormCard style={styles.list}>
+                <Text style={styles.cardTitle}>{tx('আমার চ্যানেল', 'My channel')}</Text>
+                <ListRow
+                  icon="radio-outline"
+                  title={myChannel.name}
+                  subtitle={
+                    myChannel.moderated
+                      ? tx('অ্যাডমিন সীমিত করেছেন', 'Restricted by admin')
+                      : tx('অডিওবুক প্রকাশ ও প্লেলিস্ট পরিচালনা', 'Publish audiobooks and manage playlists')
+                  }
+                  onPress={() => openChannel(myChannel)}
+                />
+                <ListRow
+                  icon="eye-outline"
+                  title={tx('পাবলিক পেজ দেখুন', 'View public page')}
+                  subtitle={tx('শ্রোতারা যেভাবে দেখেন', 'As listeners see it')}
+                  onPress={() => navigation.navigate('ChannelProfile', { channelId: myChannel.id })}
+                  last
+                />
+              </FormCard>
+            ) : null}
 
             <FormCard style={styles.list}>
               <Text style={styles.cardTitle}>{tx('আয় ও উত্তোলন', 'Earnings & withdrawals')}</Text>
@@ -267,15 +288,6 @@ export function PublisherScreen() {
         ) : null}
         <Text style={styles.fine}>{isEnglish ? 'Payouts are reviewed by administrators.' : 'উত্তোলন অ্যাডমিন যাচাই করে সম্পন্ন করেন।'}</Text>
       </ScrollView>
-
-      <ModalBottomSheet visible={channelSheet} onClose={() => setChannelSheet(false)}>
-        <View style={styles.sheet}>
-          <Text style={styles.cardTitle}>{tx('নতুন চ্যানেল', 'New channel')}</Text>
-          <Field label={tx('নাম', 'Name')} required value={channelName} onChangeText={setChannelName} maxLength={150} />
-          <Field label={tx('বিবরণ', 'Description')} value={channelDescription} onChangeText={setChannelDescription} multiline maxLength={5000} />
-          <AppButton label={tx('চ্যানেল খুলুন', 'Create channel')} onPress={createChannel} isLoading={busy === 'channel'} />
-        </View>
-      </ModalBottomSheet>
 
       <ModalBottomSheet visible={withdrawSheet} onClose={() => setWithdrawSheet(false)}>
         <View style={styles.sheet}>
@@ -425,5 +437,13 @@ const styles = StyleSheet.create({
   },
   sheet: {
     gap: Spacing.md,
+  },
+  createIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

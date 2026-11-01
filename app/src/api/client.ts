@@ -97,13 +97,38 @@ function fetchTransport(init: RequestInit): Transport {
  * Multipart uploads use XMLHttpRequest: React Native's fetch cannot serialise
  * native file descriptors ({ uri, name, type }) inside FormData.
  */
-function xhrTransport(formData: FormData, headers: Record<string, string>): Transport {
+/** Thrown when the caller cancels an upload; never retried on another host. */
+export class UploadCancelled extends Error {
+  constructor() {
+    super('Upload cancelled');
+  }
+}
+
+export interface UploadOptions {
+  /** Called with the sent fraction (0-1) while the body uploads. */
+  onProgress?: (fraction: number) => void;
+  /** Aborting it cancels the upload. */
+  signal?: AbortSignal;
+}
+
+function xhrTransport(formData: FormData, headers: Record<string, string>, options: UploadOptions = {}): Transport {
   return {
     send(url, timeoutMs) {
       return new Promise((resolve, reject) => {
+        if (options.signal?.aborted) {
+          reject(new UploadCancelled());
+          return;
+        }
         const xhr = new XMLHttpRequest();
         xhr.open('POST', url, true);
         xhr.timeout = timeoutMs;
+        if (options.onProgress) {
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && event.total > 0) options.onProgress?.(event.loaded / event.total);
+          };
+        }
+        options.signal?.addEventListener('abort', () => xhr.abort());
+        xhr.onabort = () => reject(new UploadCancelled());
         Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
         xhr.onload = () => {
           let body: any = undefined;
@@ -191,8 +216,8 @@ export const apiClient = {
   delete<T>(path: string, authenticated = true): Promise<T> {
     return jsonRequest<T>('DELETE', path, undefined, authenticated);
   },
-  async uploadFile<T>(path: string, formData: FormData, authenticated = true): Promise<T> {
+  async uploadFile<T>(path: string, formData: FormData, authenticated = true, options?: UploadOptions): Promise<T> {
     const headers = await buildHeaders(authenticated, false);
-    return execute<T>(path, xhrTransport(formData, headers), UPLOAD_TIMEOUT_MS, authenticated);
+    return execute<T>(path, xhrTransport(formData, headers, options), UPLOAD_TIMEOUT_MS, authenticated);
   },
 };

@@ -36,8 +36,14 @@ export const authApi = {
     return apiClient.post('/auth/logout');
   },
 
-  requestRecovery(email: string): Promise<{ message: string }> {
+  /** Emails a 6-digit code. `dev_code` is only returned by servers without email (development). */
+  requestRecovery(email: string): Promise<{ message: string; resend_after: number; dev_code?: string }> {
     return apiClient.post('/auth/recovery', { email: email.trim().toLowerCase() }, false);
+  },
+
+  /** Exchanges the emailed code for a one-time reset token. */
+  verifyRecoveryCode(email: string, code: string): Promise<{ token: string }> {
+    return apiClient.post('/auth/recovery/verify', { email: email.trim().toLowerCase(), code }, false);
   },
 
   resetPassword(token: string, password: string): Promise<{ message: string }> {

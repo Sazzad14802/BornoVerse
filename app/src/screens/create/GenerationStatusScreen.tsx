@@ -1,11 +1,13 @@
 /**
- * GenerationStatusScreen — step 3 of 3: follow the AI generation job.
- * Polls the job until it finishes, shows page-level progress and lets the
- * owner cancel, retry, start (if never started) or listen to finished pages.
+ * GenerationStatusScreen — step 3 of 3: follow the generation job.
+ * Polls the job until it finishes and shows a progress ring with the page
+ * count, a live step list and rotating tips. The owner can cancel, retry,
+ * start (if never started) or listen to the pages that are already ready.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useFocusEffect, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -13,6 +15,7 @@ import { AppButton } from '../../components/AppButton';
 import { TagBadge } from '../../components/TagBadge';
 import { StateView } from '../../components/StateView';
 import { BookCover } from '../../components/BookCover';
+import { ProgressRing } from '../../components/ProgressRing';
 import { audiobooksApi } from '../../api/audiobooks';
 import { generationApi } from '../../api/generation';
 import { errorMessage } from '../../api/client';
@@ -94,9 +97,38 @@ export function GenerationStatusScreen() {
     }
   };
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  // Rotating tips while the listener waits.
+  const [tip, setTip] = useState(0);
+  const tipOpacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const id = setInterval(() => {
+      Animated.timing(tipOpacity, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => {
+        setTip((t) => t + 1);
+        Animated.timing(tipOpacity, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+      });
+    }, 5000);
+    return () => clearInterval(id);
+  }, [tipOpacity]);
+
+  // A soft pulse on the active step.
+  const pulse = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.4, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
 
   if (!snapshot) {
     return (
@@ -117,6 +149,7 @@ export function GenerationStatusScreen() {
   const total = job?.total_pages ?? 0;
   const done = job?.completed_pages ?? 0;
   const percent = state === 'COMPLETED' ? 100 : total ? Math.round((done / total) * 100) : 0;
+  const working = state === 'PENDING' || state === 'PROCESSING';
 
   const label: Record<string, { text: string; variant: 'free' | 'premium' | 'offline' | 'genre' }> = {
     PENDING: { text: tx('কিউতে অপেক্ষমাণ', 'Queued'), variant: 'genre' },
@@ -128,9 +161,16 @@ export function GenerationStatusScreen() {
     NO_SOURCE: { text: tx('ফাইল নেই', 'No file'), variant: 'genre' },
   };
 
+  const tips = [
+    tx('এই পাতা ছেড়ে গেলেও কাজ চলতে থাকবে।', 'You can leave this screen; the work keeps going.'),
+    tx('প্রথম পৃষ্ঠা তৈরি হলেই শোনা শুরু করতে পারবেন।', 'You can start listening as soon as the first page is ready.'),
+    tx('শেষ হলে নোটিফিকেশন পাবেন।', 'You will get a notification when it is done.'),
+    tx('প্রতিটি পৃষ্ঠা একটি আলাদা অধ্যায় হয়।', 'Each page becomes its own chapter.'),
+  ];
+
   const steps = [
-    { label: tx('PDF আপলোড', 'PDF uploaded'), done: !!book.source_file_url },
-    { label: tx('কিউতে যুক্ত', 'Queued'), done: !!job },
+    { label: tx('PDF আপলোড', 'PDF uploaded'), done: !!book.source_file_url, active: false },
+    { label: tx('কিউতে যুক্ত', 'Queued'), done: !!job && state !== 'PENDING', active: state === 'PENDING' },
     {
       label: total
         ? tx(`লেখা পড়া ও বর্ণনা · ${done}/${total} পৃষ্ঠা`, `Reading & narrating · ${done}/${total} pages`)
@@ -138,7 +178,7 @@ export function GenerationStatusScreen() {
       done: state === 'COMPLETED',
       active: state === 'PROCESSING',
     },
-    { label: tx('শোনার জন্য প্রস্তুত', 'Ready to listen'), done: state === 'COMPLETED' },
+    { label: tx('শোনার জন্য প্রস্তুত', 'Ready to listen'), done: state === 'COMPLETED', active: false },
   ];
 
   const listen = async () => {
@@ -176,7 +216,7 @@ export function GenerationStatusScreen() {
         }
       >
         <View style={styles.hero}>
-          <BookCover title={book.title} uri={book.cover_image_url} size={72} />
+          <BookCover title={book.title} uri={book.cover_image_url} size={56} />
           <View style={styles.heroText}>
             <Text style={styles.bookTitle} numberOfLines={2}>
               {book.title}
@@ -185,43 +225,47 @@ export function GenerationStatusScreen() {
           </View>
         </View>
 
+        <View style={styles.ringBlock}>
+          <ProgressRing
+            progress={percent / 100}
+            indeterminate={state === 'PENDING' || (state === 'PROCESSING' && !total)}
+            color={state === 'FAILED' ? Colors.error : Colors.primary}
+            caption={total ? tx(`${done}/${total} পৃষ্ঠা`, `${done} / ${total} pages`) : undefined}
+          />
+          {working ? (
+            <Animated.Text style={[styles.tip, { opacity: tipOpacity }]}>{tips[tip % tips.length]}</Animated.Text>
+          ) : null}
+        </View>
+
         <View style={styles.card}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>{tx('অগ্রগতি', 'Progress')}</Text>
-            <Text style={styles.progressValue}>{percent}%</Text>
-          </View>
-          <View style={styles.track}>
-            <View style={[styles.fill, { width: `${percent}%` }, state === 'FAILED' && styles.fillFailed]} />
-          </View>
-          {steps.map((step) => (
+          {steps.map((step, i) => (
             <View key={step.label} style={styles.stepRow}>
-              <Text style={[styles.stepMark, step.done && styles.stepDone, step.active && styles.stepActive]}>
-                {step.done ? '●' : step.active ? '◐' : '○'}
+              <View style={styles.stepRail}>
+                {step.done ? (
+                  <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
+                ) : step.active ? (
+                  <Animated.View style={[styles.activeDot, { opacity: pulse }]} />
+                ) : (
+                  <Ionicons name="ellipse-outline" size={22} color={Colors.textMuted} />
+                )}
+                {i < steps.length - 1 ? <View style={[styles.railLine, step.done && styles.railLineDone]} /> : null}
+              </View>
+              <Text style={[styles.stepText, step.active && styles.stepTextActive, !step.done && !step.active && styles.stepPending]}>
+                {step.label}
               </Text>
-              <Text style={[styles.stepText, !step.done && !step.active && styles.stepPending]}>{step.label}</Text>
             </View>
           ))}
-          {state === 'PENDING' ? (
-            <Text style={styles.note}>
-              {tx(
-                'ন্যায্য কিউ অনুযায়ী আপনার পালা এলে শুরু হবে। এই পাতা ছেড়ে গেলেও কাজ চলবে।',
-                'It starts when your turn comes in the fair queue. You can leave this screen.',
-              )}
-            </Text>
-          ) : null}
           {job?.error_message && state !== 'COMPLETED' ? <Text style={styles.errorText}>{job.error_message}</Text> : null}
         </View>
 
         {state === 'COMPLETED' ? (
-          <>
-            <AppButton label={tx('শুনুন', 'Listen now')}
-            icon="play" onPress={listen} isLoading={busy === 'listen'} />
-          </>
+          <AppButton label={tx('শুনুন', 'Listen now')} icon="play" onPress={listen} isLoading={busy === 'listen'} />
         ) : null}
 
         {state === 'PROCESSING' && done > 0 ? (
           <AppButton
             label={tx(`তৈরি হওয়া ${done} পৃষ্ঠা শুনুন`, `Listen to ${done} ready pages`)}
+            icon="headset-outline"
             variant="secondary"
             onPress={listen}
             isLoading={busy === 'listen'}
@@ -231,6 +275,7 @@ export function GenerationStatusScreen() {
         {state === 'NOT_STARTED' || state === 'CANCELLED' ? (
           <AppButton
             label={tx('অডিও তৈরি শুরু করুন', 'Start generating')}
+            icon="sparkles-outline"
             onPress={() => act('start', () => generationApi.start(audiobookId))}
             isLoading={busy === 'start'}
           />
@@ -239,15 +284,16 @@ export function GenerationStatusScreen() {
         {state === 'FAILED' && job ? (
           <AppButton
             label={tx('আবার চেষ্টা করুন', 'Retry')}
+            icon="reload"
             onPress={() => act('retry', () => generationApi.retry(job.id))}
             isLoading={busy === 'retry'}
           />
         ) : null}
 
-        {(state === 'PENDING' || state === 'PROCESSING') && job ? (
+        {working && job ? (
           <AppButton
             label={tx('বাতিল করুন', 'Cancel')}
-            variant="secondary"
+            variant="text"
             isLoading={busy === 'cancel'}
             onPress={() =>
               Alert.alert(tx('বাতিল করবেন?', 'Cancel generation?'), tx('ইতিমধ্যে তৈরি পৃষ্ঠা থেকে যাবে।', 'Pages already generated are kept.'), [
@@ -264,7 +310,12 @@ export function GenerationStatusScreen() {
             compact
             title={tx('এখনো কোনো PDF নেই', 'No PDF uploaded yet')}
             actionLabel={tx('আপলোড করুন', 'Upload')}
-            onAction={() => (navigation.getParent() as any)?.navigate('CreateTab', { screen: 'UploadSource', params: { audiobookId, title: book.title } })}
+            onAction={() =>
+              (navigation.getParent() as any)?.navigate('CreateTab', {
+                screen: 'UploadSource',
+                params: { audiobookId, title: book.title },
+              })
+            }
           />
         ) : null}
       </ScrollView>
@@ -297,71 +348,66 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textPrimary,
   },
+  ringBlock: {
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  tip: {
+    minHeight: 40,
+    fontSize: FontSizes.sm,
+    lineHeight: 20,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.lg,
+  },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
     padding: Spacing.md,
-    gap: Spacing.sm,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  progressLabel: {
-    fontSize: FontSizes.sm,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  progressValue: {
-    fontSize: FontSizes.sm,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  track: {
-    height: 8,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.track,
-    overflow: 'hidden',
-    marginBottom: Spacing.xs,
-  },
-  fill: {
-    height: '100%',
-    backgroundColor: Colors.brand,
-  },
-  fillFailed: {
-    backgroundColor: Colors.error,
   },
   stepRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+  },
+  stepRail: {
+    width: 22,
     alignItems: 'center',
-    gap: Spacing.sm,
   },
-  stepMark: {
-    width: 16,
-    color: Colors.textMuted,
-    fontSize: 13,
+  activeDot: {
+    width: 18,
+    height: 18,
+    margin: 2,
+    borderRadius: 9,
+    backgroundColor: Colors.primary,
   },
-  stepDone: {
-    color: Colors.success,
+  railLine: {
+    width: 2,
+    height: 18,
+    backgroundColor: Colors.surfaceBorder,
+    marginVertical: 2,
   },
-  stepActive: {
-    color: Colors.primary,
+  railLineDone: {
+    backgroundColor: Colors.success,
   },
   stepText: {
+    flex: 1,
+    paddingTop: 2,
     fontSize: FontSizes.sm,
     color: Colors.textPrimary,
+  },
+  stepTextActive: {
+    fontWeight: '700',
+    color: Colors.primary,
   },
   stepPending: {
     color: Colors.textMuted,
   },
-  note: {
-    fontSize: FontSizes.xs,
-    color: Colors.textSecondary,
-    lineHeight: 17,
-  },
   errorText: {
+    marginTop: Spacing.sm,
     fontSize: FontSizes.sm,
     color: Colors.tintErrorText,
   },

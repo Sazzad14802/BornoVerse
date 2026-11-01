@@ -17,6 +17,7 @@ class UserRead(UserBase):
 
     id: uuid.UUID
     serial: int | None = None
+    publishing_restricted_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
     account_type: str

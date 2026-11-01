@@ -16,6 +16,8 @@ export interface Audiobook {
   genre: string | null;
   access_tier: AccessTier;
   channel_id: string | null;
+  /** Name of the channel it is published in. */
+  channel_name?: string | null;
   publication_status: string;
   moderated: boolean;
   cover_image_url: string | null;

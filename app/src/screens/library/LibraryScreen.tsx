@@ -1,6 +1,7 @@
 /**
- * LibraryScreen — the user's own collections in four tabs:
- * saved audiobooks, playlists, offline downloads, and audiobooks they created.
+ * LibraryScreen — the user's own collections in five tabs: saved audiobooks,
+ * channels they follow (with the notification bell), playlists, offline
+ * downloads, and audiobooks they created.
  */
 
 import React, { useState } from 'react';
@@ -14,6 +15,8 @@ import { StateView } from '../../components/StateView';
 import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { AppButton } from '../../components/AppButton';
 import { libraryApi, playlistsApi } from '../../api/library';
+import { ChannelSummary, socialApi } from '../../api/social';
+import { ChannelRow } from '../../components/ChannelRow';
 import { audiobooksApi } from '../../api/audiobooks';
 import { errorMessage } from '../../api/client';
 import { offline } from '../../storage/offline';
@@ -26,7 +29,7 @@ import { Audiobook } from '../../types/audiobook';
 import { Playlist } from '../../types/domain';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
-type Tab = 'saved' | 'playlists' | 'downloads' | 'mine';
+type Tab = 'saved' | 'following' | 'playlists' | 'downloads' | 'mine';
 
 export function LibraryScreen() {
   const { navigation, goToTab } = useAppNavigation();
@@ -39,13 +42,17 @@ export function LibraryScreen() {
   const [creating, setCreating] = useState(false);
 
   const library = useResource(async () => {
-    const [saved, playlists, downloads, mine] = await Promise.all([
+    const [saved, following, playlists, downloads, mine] = await Promise.all([
       libraryApi.list().then((r) => r.items.map((i) => i.audiobook)),
+      socialApi
+        .channels()
+        .then((all) => all.filter((c) => c.following))
+        .catch(() => [] as ChannelSummary[]),
       playlistsApi.list(),
       user ? offline.list(user.id).catch(() => []) : Promise.resolve([]),
       audiobooksApi.listMine().then((r) => r.items),
     ]);
-    return { saved, playlists, downloads, mine };
+    return { saved, following, playlists, downloads, mine };
   }, [user?.id]);
 
   const data = library.data;
@@ -98,6 +105,12 @@ export function LibraryScreen() {
       action: tx('অডিওবুক খুঁজুন', 'Browse audiobooks'),
       onAction: () => goToTab('ExploreTab', { screen: 'Explore' }),
     },
+    following: {
+      title: tx('কোনো চ্যানেল ফলো করছেন না', 'Not following any channels'),
+      message: tx('চ্যানেল ফলো করলে তাদের নতুন অডিওবুক হোমে দেখবেন।', 'Follow channels to see their new audiobooks on Home.'),
+      action: tx('চ্যানেল খুঁজুন', 'Find channels'),
+      onAction: () => goToTab('ExploreTab', { screen: 'Explore' }),
+    },
     playlists: {
       title: tx('কোনো প্লেলিস্ট নেই', 'No playlists yet'),
       message: tx('নিজের মতো করে অডিওবুক সাজিয়ে রাখুন।', 'Group audiobooks your own way.'),
@@ -136,6 +149,7 @@ export function LibraryScreen() {
           onChange={setTab}
           options={[
             { value: 'saved', label: `${tx('সেভ করা', 'Saved')}${data ? ` · ${data.saved.length}` : ''}` },
+            { value: 'following', label: `${tx('ফলো করছেন', 'Following')}${data ? ` · ${data.following.length}` : ''}` },
             { value: 'playlists', label: `${tx('প্লেলিস্ট', 'Playlists')}${data ? ` · ${data.playlists.length}` : ''}` },
             { value: 'downloads', label: `${tx('ডাউনলোড', 'Downloads')}${data ? ` · ${data.downloads.length}` : ''}` },
             { value: 'mine', label: `${tx('আমার তৈরি', 'My creations')}${data ? ` · ${data.mine.length}` : ''}` },
@@ -147,6 +161,31 @@ export function LibraryScreen() {
         <StateView kind="loading" />
       ) : library.error && !data ? (
         <StateView kind="error" message={library.error} actionLabel={tx('আবার চেষ্টা', 'Retry')} onAction={library.reload} />
+      ) : tab === 'following' ? (
+        <FlatList<ChannelSummary>
+          data={data?.following ?? []}
+          keyExtractor={(c) => c.id}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={library.isRefreshing} onRefresh={library.refresh} tintColor={Colors.primary} />}
+          ListEmptyComponent={
+            <StateView kind="empty" title={empty.title} message={empty.message} actionLabel={empty.action} onAction={empty.onAction} />
+          }
+          renderItem={({ item, index }) => (
+            <ChannelRow
+              channel={item}
+              last={index === (data?.following.length ?? 0) - 1}
+              onPress={() => navigation.navigate('ChannelProfile', { channelId: item.id })}
+              onChange={(next) =>
+                library.setData((current) => ({
+                  ...current!,
+                  following: next.following
+                    ? current!.following.map((c) => (c.id === next.id ? next : c))
+                    : current!.following.filter((c) => c.id !== next.id),
+                }))
+              }
+            />
+          )}
+        />
       ) : tab === 'playlists' ? (
         <FlatList<Playlist>
           data={data?.playlists ?? []}

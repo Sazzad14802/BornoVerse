@@ -15,6 +15,7 @@ from app.services.scheduler import claim
 from app.services.notification_service import deliver, notify
 from app.services.policy import configuration
 from app.services.storage_service import get_storage_service
+from app.services.social_service import announce
 
 log = logging.getLogger("generation-worker")
 
@@ -99,8 +100,11 @@ async def process(id, token):
                 notice = notify(db, job.owner_id, "generation.completed",
                                 "অডিওবুক প্রস্তুত", f"«{book.title}» শোনার জন্য প্রস্তুত।",
                                 audiobook_id=book.id, job_id=job.id)
+                # A book created public in a channel goes live now: tell bell followers.
+                await db.flush()
+                followers = await announce(db, book)
                 await db.commit()
-                await deliver(db, [notice])
+                await deliver(db, [notice, *followers])
     except asyncio.CancelledError:
         log.info("Generation cancelled or lease lost: %s", id)
     except Exception:

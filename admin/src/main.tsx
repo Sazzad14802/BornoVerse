@@ -2,8 +2,8 @@ import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { request, setToken, documentUrl } from "./api";
 import "./styles.css";
-
-type Row = Record<string, any>;
+import { Icon, Modal, Row, dateTime, memberId } from "./ui";
+import { AppealsPage, ReportsPage, UserRecordModal } from "./Moderation";
 const sections: [string, [string, string][]][] = [
   ["", [["Overview", "summary"]]],
   [
@@ -18,7 +18,13 @@ const sections: [string, [string, string][]][] = [
     [
       ["Audiobooks", "audiobooks"],
       ["Channels", "channels"],
+    ],
+  ],
+  [
+    "Moderation",
+    [
       ["Content reports", "reports"],
+      ["Appeals", "appeals"],
     ],
   ],
   [
@@ -44,6 +50,7 @@ const navigation = sections.flatMap(([, items]) => items);
 const attentionLabels: Record<string, string> = {
   applications: "Publisher applications awaiting review",
   reports: "Open content reports",
+  appeals: "Appeals awaiting a decision",
   withdrawals: "Withdrawal requests awaiting approval",
 };
 /** What each confirm-only decision does; a rejection asks for a reason instead. */
@@ -65,44 +72,6 @@ const headings: Record<string, string> = {
 const label = (text: string) =>
   headings[text] ??
   text.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
-const memberId = (value: unknown) =>
-  typeof value === "number" ? `U-${String(value).padStart(4, "0")}` : "—";
-const dateTime = (value: unknown) =>
-  value
-    ? new Date(String(value)).toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : "—";
-const ICONS: Record<string, string> = {
-  play: "M8 5.14v13.72a1 1 0 0 0 1.52.85l10.6-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z",
-  refresh:
-    "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.75 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z",
-  close:
-    "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
-  bell: "M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1z",
-  logout:
-    "M10.09 15.59 11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67zM19 3H5a2 2 0 0 0-2 2v4h2V5h14v14H5v-4H3v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z",
-  document:
-    "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 7V3.5L18.5 9zM8 13h8v2H8zm0 4h8v2H8z",
-};
-function Icon({ name, size = 16 }: { name: string; size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d={ICONS[name]} />
-    </svg>
-  );
-}
 const money = (value: unknown) =>
   new Intl.NumberFormat("en-BD", { style: "currency", currency: "BDT" }).format(
     Number(value),
@@ -128,6 +97,7 @@ export function App() {
   const [plan, setPlan] = useState<Row | null>(null);
   const [attention, setAttention] = useState<Record<string, number>>({});
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [recordUser, setRecordUser] = useState<string | null>(null);
   const requestSequence = useRef(0);
 
   async function loadAttention() {
@@ -156,6 +126,7 @@ export function App() {
   }
 
   async function load() {
+    if (page === "reports" || page === "appeals") return;
     const sequence = ++requestSequence.current;
     setBusy(true);
     setError("");
@@ -513,212 +484,231 @@ export function App() {
             submit={async (body) => mutate("/admin/adjustments", "POST", body)}
           />
         )}
-        {!busy && Array.isArray(rows) && (
-          <>
-            {page === "plans" && (
-              <button
-                onClick={() =>
-                  setPlan({
-                    name: "",
-                    months: 1,
-                    price: "150.00",
-                    active: true,
-                  })
-                }
-              >
-                Add subscription plan
-              </button>
-            )}
-            <DataTable
-              rows={rows}
-              columns={columns[page] || []}
-              actions={(row) => (
-                <div className="actions">
-                  {page === "users" && row.account_type !== "admin" && (
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        decide(
-                          `/admin/users/${row.id}/decision`,
-                          row.suspended ? "unsuspend" : "suspend",
-                          row.email,
-                        )
-                      }
-                    >
-                      {row.suspended ? "Unsuspend" : "Suspend"}
-                    </button>
-                  )}
-                  {page === "applications" && (
-                    <>
+        {page === "reports" && (
+          <ReportsPage listen={listen} onChanged={loadAttention} />
+        )}
+        {page === "appeals" && (
+          <AppealsPage listen={listen} onChanged={loadAttention} />
+        )}
+        {!busy &&
+          Array.isArray(rows) &&
+          !["reports", "appeals"].includes(page) && (
+            <>
+              {page === "plans" && (
+                <button
+                  onClick={() =>
+                    setPlan({
+                      name: "",
+                      months: 1,
+                      price: "150.00",
+                      active: true,
+                    })
+                  }
+                >
+                  Add subscription plan
+                </button>
+              )}
+              <DataTable
+                rows={rows}
+                columns={columns[page] || []}
+                actions={(row) => (
+                  <div className="actions">
+                    {page === "users" && row.account_type !== "admin" && (
                       <button
                         className="secondary"
-                        onClick={async () => {
-                          try {
-                            setDocument(await documentUrl(row.id));
-                          } catch (e) {
-                            setError((e as Error).message);
-                          }
-                        }}
+                        onClick={() => setRecordUser(row.id)}
                       >
-                        <Icon name="document" size={14} />
-                        View document
+                        <Icon name="shield" size={14} />
+                        Record
                       </button>
-                      {row.status === "pending" && (
-                        <>
-                          <button
-                            onClick={() =>
-                              decide(
-                                `/admin/applications/${row.id}/decision`,
-                                "approve",
-                                row.legal_name,
-                              )
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="secondary"
-                            onClick={() =>
-                              decide(
-                                `/admin/applications/${row.id}/decision`,
-                                "reject",
-                                row.legal_name,
-                              )
-                            }
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {["audiobooks", "channels"].includes(page) && (
-                    <>
+                    )}
+                    {page === "users" && row.account_type !== "admin" && (
                       <button
                         className="secondary"
                         onClick={() =>
                           decide(
-                            `/admin/moderation/${page}/${row.id}`,
-                            row.moderated ? "restore" : "restrict",
-                            row.title || row.name,
+                            `/admin/users/${row.id}/decision`,
+                            row.suspended ? "unsuspend" : "suspend",
+                            row.email,
                           )
                         }
                       >
-                        {row.moderated ? "Restore" : "Restrict"}
+                        {row.suspended ? "Unsuspend" : "Suspend"}
                       </button>
-                      {page === "audiobooks" && (
-                        <button
-                          className="secondary"
-                          onClick={() => listen(row.id)}
-                        >
-                          <Icon name="play" size={14} />
-                          Listen
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {page === "reports" && (
-                    <>
-                      <button
-                        className="secondary"
-                        onClick={() => listen(row.audiobook_id)}
-                      >
-                        <Icon name="play" size={14} />
-                        Listen
-                      </button>
-                      {row.status === "open" && (
-                        <>
-                          <button
-                            onClick={() =>
-                              decide(
-                                `/admin/reports/${row.id}/decision`,
-                                "resolve",
-                                row.reason,
-                              )
-                            }
-                          >
-                            Resolve
-                          </button>
-                          <button
-                            className="secondary"
-                            onClick={() =>
-                              decide(
-                                `/admin/reports/${row.id}/decision`,
-                                "dismiss",
-                                row.reason,
-                              )
-                            }
-                          >
-                            Dismiss
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {page === "plans" && (
-                    <button
-                      className="secondary"
-                      onClick={() => setPlan({ ...row })}
-                    >
-                      Edit
-                    </button>
-                  )}
-                  {page === "withdrawals" &&
-                    ["pending", "approved"].includes(row.status) && (
+                    )}
+                    {page === "applications" && (
                       <>
                         <button
+                          className="secondary"
+                          onClick={async () => {
+                            try {
+                              setDocument(await documentUrl(row.id));
+                            } catch (e) {
+                              setError((e as Error).message);
+                            }
+                          }}
+                        >
+                          <Icon name="document" size={14} />
+                          View document
+                        </button>
+                        {row.status === "pending" && (
+                          <>
+                            <button
+                              onClick={() =>
+                                decide(
+                                  `/admin/applications/${row.id}/decision`,
+                                  "approve",
+                                  row.legal_name,
+                                )
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="secondary"
+                              onClick={() =>
+                                decide(
+                                  `/admin/applications/${row.id}/decision`,
+                                  "reject",
+                                  row.legal_name,
+                                )
+                              }
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
+                    {["audiobooks", "channels"].includes(page) && (
+                      <>
+                        <button
+                          className="secondary"
                           onClick={() =>
                             decide(
-                              `/admin/withdrawals/${row.id}/decision`,
-                              row.status === "pending" ? "approve" : "complete",
-                              `${money(row.amount)} · simulated payout`,
+                              `/admin/moderation/${page}/${row.id}`,
+                              row.moderated ? "restore" : "restrict",
+                              row.title || row.name,
                             )
                           }
                         >
-                          {row.status === "pending"
-                            ? "Approve"
-                            : "Record simulated completion"}
+                          {row.moderated ? "Restore" : "Restrict"}
                         </button>
-                        {row.status === "pending" && (
+                        {page === "audiobooks" && (
                           <button
                             className="secondary"
-                            onClick={() =>
-                              decide(
-                                `/admin/withdrawals/${row.id}/decision`,
-                                "reject",
-                                "Withdrawal",
-                              )
-                            }
+                            onClick={() => listen(row.id)}
                           >
-                            Reject
+                            <Icon name="play" size={14} />
+                            Listen
                           </button>
                         )}
                       </>
                     )}
+                    {page === "reports" && (
+                      <>
+                        <button
+                          className="secondary"
+                          onClick={() => listen(row.audiobook_id)}
+                        >
+                          <Icon name="play" size={14} />
+                          Listen
+                        </button>
+                        {row.status === "open" && (
+                          <>
+                            <button
+                              onClick={() =>
+                                decide(
+                                  `/admin/reports/${row.id}/decision`,
+                                  "resolve",
+                                  row.reason,
+                                )
+                              }
+                            >
+                              Resolve
+                            </button>
+                            <button
+                              className="secondary"
+                              onClick={() =>
+                                decide(
+                                  `/admin/reports/${row.id}/decision`,
+                                  "dismiss",
+                                  row.reason,
+                                )
+                              }
+                            >
+                              Dismiss
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
+                    {page === "plans" && (
+                      <button
+                        className="secondary"
+                        onClick={() => setPlan({ ...row })}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {page === "withdrawals" &&
+                      ["pending", "approved"].includes(row.status) && (
+                        <>
+                          <button
+                            onClick={() =>
+                              decide(
+                                `/admin/withdrawals/${row.id}/decision`,
+                                row.status === "pending"
+                                  ? "approve"
+                                  : "complete",
+                                `${money(row.amount)} · simulated payout`,
+                              )
+                            }
+                          >
+                            {row.status === "pending"
+                              ? "Approve"
+                              : "Record simulated completion"}
+                          </button>
+                          {row.status === "pending" && (
+                            <button
+                              className="secondary"
+                              onClick={() =>
+                                decide(
+                                  `/admin/withdrawals/${row.id}/decision`,
+                                  "reject",
+                                  "Withdrawal",
+                                )
+                              }
+                            >
+                              Reject
+                            </button>
+                          )}
+                        </>
+                      )}
+                  </div>
+                )}
+              />
+              {!["plans"].includes(page) && (
+                <div className="pagination">
+                  <button
+                    className="secondary"
+                    disabled={number === 1}
+                    onClick={() => setNumber(number - 1)}
+                  >
+                    Previous
+                  </button>
+                  <span>Page {number}</span>
+                  <button
+                    className="secondary"
+                    disabled={rows.length < 50}
+                    onClick={() => setNumber(number + 1)}
+                  >
+                    Next
+                  </button>
                 </div>
               )}
-            />
-            {!["plans"].includes(page) && (
-              <div className="pagination">
-                <button
-                  className="secondary"
-                  disabled={number === 1}
-                  onClick={() => setNumber(number - 1)}
-                >
-                  Previous
-                </button>
-                <span>Page {number}</span>
-                <button
-                  className="secondary"
-                  disabled={rows.length < 50}
-                  onClick={() => setNumber(number + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-          </>
-        )}
+            </>
+          )}
         <footer>
           BornoVerse · Administration <span>All financial values in BDT</span>
         </footer>
@@ -853,6 +843,12 @@ export function App() {
           </ol>
         </Modal>
       )}
+      {recordUser && (
+        <UserRecordModal
+          userId={recordUser}
+          close={() => setRecordUser(null)}
+        />
+      )}
       {document && (
         <Modal
           title="Publisher verification document"
@@ -886,7 +882,6 @@ const columns: Record<string, string[]> = {
     "moderated",
   ],
   channels: ["name", "owner_id", "moderated"],
-  reports: ["reason", "audiobook_id", "status", "resolution"],
   plans: ["name", "months", "price", "active"],
   payments: ["id", "kind", "amount", "status", "created_at"],
   withdrawals: ["member", "amount", "destination", "status", "reason"],
@@ -954,68 +949,6 @@ function DataTable({
           )}
         </tbody>
       </table>
-    </div>
-  );
-}
-function Modal({
-  title,
-  close,
-  children,
-}: {
-  title: string;
-  close: () => void;
-  children: React.ReactNode;
-}) {
-  const panel = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const previous = window.document.activeElement as HTMLElement | null;
-    panel.current
-      ?.querySelector<HTMLElement>("input, textarea, button, select, a")
-      ?.focus();
-    return () => previous?.focus();
-  }, []);
-  return (
-    <div className="scrim" onClick={close}>
-      <section
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") close();
-          if (e.key === "Tab") {
-            const focusable = Array.from(
-              panel.current?.querySelectorAll<HTMLElement>(
-                "button:not(:disabled), input, textarea, select, a[href], audio",
-              ) || [],
-            );
-            const first = focusable[0],
-              last = focusable[focusable.length - 1];
-            if (e.shiftKey && window.document.activeElement === first) {
-              e.preventDefault();
-              last?.focus();
-            }
-            if (!e.shiftKey && window.document.activeElement === last) {
-              e.preventDefault();
-              first?.focus();
-            }
-          }
-        }}
-      >
-        <div className="modal-heading">
-          <h2>{title}</h2>
-          <button
-            className="icon-button"
-            onClick={close}
-            aria-label="Close dialog"
-          >
-            <Icon name="close" size={20} />
-          </button>
-        </div>
-        {children}
-      </section>
     </div>
   );
 }

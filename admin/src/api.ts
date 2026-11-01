@@ -32,3 +32,12 @@ export async function documentUrl(id: string) {
   if (!response.ok) throw new Error("Could not retrieve verification document");
   return URL.createObjectURL(await response.blob());
 }
+
+/** Fetch an authorised file (e.g. moderation evidence) and return a temporary object URL. */
+export async function fileUrl(path: string) {
+  const response = await fetch(`/api/v1${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error("Could not open the file");
+  return URL.createObjectURL(await response.blob());
+}

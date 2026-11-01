@@ -10,11 +10,11 @@
 import React, { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
 import { BookCover } from '../../components/BookCover';
-import { ChipGroup } from '../../components/Chip';
-import { Field, FormCard, Segmented } from '../../components/Form';
+import { ChoiceCards, Field, FormCard, SelectField } from '../../components/Form';
 import { audiobooksApi } from '../../api/audiobooks';
 import { generationApi } from '../../api/generation';
 import { errorMessage } from '../../api/client';
@@ -124,11 +124,16 @@ export function CreateAudiobookScreen() {
             <View style={styles.coverRow}>
               <Pressable onPress={chooseCover} style={styles.coverPicker} accessibilityRole="button" accessibilityLabel={tx('কভার বেছে নিন', 'Choose cover')}>
                 {cover ? (
-                  <BookCover title={title || '?'} uri={cover.uri} size={84} />
+                  <View>
+                    <BookCover title={title || '?'} uri={cover.uri} size={84} />
+                    <View style={styles.coverEdit}>
+                      <Ionicons name="create-outline" size={14} color={Colors.textOnPrimary} />
+                    </View>
+                  </View>
                 ) : (
                   <View style={styles.coverPlaceholder}>
-                    <Text style={styles.coverPlus}>＋</Text>
-                    <Text style={styles.coverLabel}>{tx('কভার', 'Cover')}</Text>
+                    <Ionicons name="image-outline" size={24} color={Colors.primary} />
+                    <Text style={styles.coverLabel}>{tx('কভার যোগ', 'Add cover')}</Text>
                   </View>
                 )}
               </Pressable>
@@ -156,25 +161,26 @@ export function CreateAudiobookScreen() {
               multiline
               maxLength={2000}
             />
-            <Segmented
+            <ChoiceCards
               label={tx('বর্ণনার ভাষা', 'Narration language')}
               value={language}
               onChange={setLanguage}
               options={[
-                { value: 'bn', label: 'বাংলা' },
-                { value: 'en', label: 'English' },
+                { value: 'bn', label: 'বাংলা', icon: 'language-outline', description: tx('বাংলা লেখা', 'Bangla text') },
+                { value: 'en', label: 'English', icon: 'language-outline', description: tx('ইংরেজি লেখা', 'English text') },
               ]}
               hint={tx('PDF-এর লেখা যে ভাষায়, সেটি বেছে নিন।', 'Choose the language the PDF is written in.')}
             />
-            <View style={styles.field}>
-              <Text style={styles.label}>{tx('ধরন', 'Genre')}</Text>
-              <ChipGroup
-                scrollable
-                value={genre}
-                onChange={setGenre}
-                options={[{ value: '', label: tx('নেই', 'None') }, ...GENRES.map((g) => ({ value: g.key, label: isEnglish ? g.en : g.bn }))]}
-              />
-            </View>
+            <SelectField
+              label={tx('ধরন', 'Genre')}
+              placeholder={tx('ধরন বেছে নিন', 'Choose a genre')}
+              value={genre}
+              onChange={setGenre}
+              options={[
+                { value: '', label: tx('কোনোটিই নয়', 'None') },
+                ...GENRES.map((g) => ({ value: g.key, label: isEnglish ? g.en : g.bn, icon: g.icon as any })),
+              ]}
+            />
           </FormCard>
 
           <Text style={styles.note}>
@@ -261,18 +267,29 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: Colors.textMuted,
-    backgroundColor: Colors.surfaceElevated,
+    borderColor: Colors.primaryLight,
+    backgroundColor: Colors.primarySurface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  coverPlus: {
-    fontSize: 22,
-    color: Colors.textSecondary,
+  coverEdit: {
+    position: 'absolute',
+    right: -6,
+    bottom: -6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.primary,
+    borderWidth: 2,
+    borderColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   coverLabel: {
+    marginTop: 4,
     fontSize: FontSizes.xs,
-    color: Colors.textSecondary,
+    fontWeight: '600',
+    color: Colors.primary,
   },
   field: {
     gap: 6,

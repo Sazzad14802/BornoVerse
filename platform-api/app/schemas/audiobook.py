@@ -62,6 +62,7 @@ class AudiobookRead(BaseModel):
     updated_at: datetime
     genre: str | None = None
     channel_id: uuid.UUID | None = None
+    channel_name: str | None = None
     access_tier: str = "free"
     publication_status: str = "draft"
     moderated: bool = False

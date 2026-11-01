@@ -11,6 +11,7 @@ from app.models.platform import (Channel, PublisherApplication, Setting, Plan, O
     Report, Withdrawal, FinancialSnapshot, Ledger, PaymentEvent)
 from app.schemas.platform import Decision, PlanInput, PolicyInput, AdjustmentInput
 from app.models.platform import FinancialAdjustment
+from app.models.moderation import ContentAppeal
 from app.schemas.user import UserRead
 from app.services.policy import audit, configuration, month_now
 from app.services import billing
@@ -33,7 +34,8 @@ async def attention(db: DatabaseDep, admin: AdminDep):
     counts = {}
     for name, model, condition in [
         ("applications", PublisherApplication, PublisherApplication.status == "pending"),
-        ("reports", Report, Report.status == "open"),
+        ("reports", Report, Report.status.in_(("pending", "under_review"))),
+        ("appeals", ContentAppeal, ContentAppeal.status == "pending"),
         ("withdrawals", Withdrawal, Withdrawal.status == "pending")]:
         counts[name] = await db.scalar(select(func.count()).select_from(model).where(condition))
     return counts
@@ -45,7 +47,7 @@ async def summary(db: DatabaseDep, admin: AdminDep):
         ("users", User, [User.account_type == "user"]),
         ("verified_publishers", User, [User.account_type == "user", User.publisher_status == "active"]),
         ("pending_applications", PublisherApplication, [PublisherApplication.status == "pending"]),
-        ("audiobooks", Audiobook, []), ("open_reports", Report, [Report.status == "open"]),
+        ("audiobooks", Audiobook, []), ("open_reports", Report, [Report.status.in_(("pending", "under_review"))]),
         ("queued_jobs", GenerationJob, [GenerationJob.status == "PENDING", GenerationJob.cancelled.is_(False)])]:
         result[name] = await db.scalar(select(func.count()).select_from(model).where(*conditions))
     return result
@@ -145,10 +147,6 @@ async def moderate(kind: str, id: UUID, data: Decision, db: DatabaseDep, admin: 
     await db.commit()
     await deliver(db, [notice])
     return record(row)
-
-@router.get("/reports")
-async def reports(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(Report).order_by(Report.created_at.desc()).offset((page-1)*50).limit(50))).all()]
 
 @router.post("/reports/{id}/decision")
 async def report_decision(id: UUID, data: Decision, db: DatabaseDep, admin: AdminDep):

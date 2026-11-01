@@ -5,7 +5,8 @@ Audiobook database model and status/visibility enums.
 import enum
 from typing import TYPE_CHECKING, Optional
 import uuid
-from sqlalchemy import Enum, Float, ForeignKey, String, Text, Uuid, Boolean
+from datetime import datetime
+from sqlalchemy import Enum, Float, ForeignKey, String, Text, Uuid, Boolean, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -37,6 +38,8 @@ class Audiobook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     access_tier: Mapped[str] = mapped_column(String(20), default="free", nullable=False)
     publication_status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     moderated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # When channel followers were told about this audiobook (at most once).
+    announced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     owner_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -121,3 +124,13 @@ class Audiobook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="audiobook",
         cascade="all, delete-orphan",
     )
+    # Loaded with every query so listings can show the channel name.
+    channel: Mapped[Optional["Channel"]] = relationship("Channel", lazy="selectin", viewonly=True)
+
+    @property
+    def channel_name(self) -> Optional[str]:
+        """The channel's name, or None when there is none or it is not loaded (never lazy-loads)."""
+        from sqlalchemy import inspect
+        if "channel" in inspect(self).unloaded or self.channel is None:
+            return None
+        return self.channel.name

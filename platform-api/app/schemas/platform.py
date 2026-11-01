@@ -21,6 +21,11 @@ class ChannelInput(Input):
     name: str = Field(min_length=1, max_length=150)
     description: str = Field(default="", max_length=5000)
 
+class PlaylistInput(Input):
+    name: str = Field(min_length=1, max_length=150)
+    # True: a public playlist on the publisher's channel.
+    channel: bool = False
+
 class OrderInput(Input):
     kind: Literal["subscription", "publisher_registration"]
     plan_id: UUID | None = None

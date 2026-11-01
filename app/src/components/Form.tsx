@@ -7,7 +7,10 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ModalBottomSheet, SheetScrollView } from './ModalBottomSheet';
 import { Colors, FontSizes, Radius, Spacing } from '../theme';
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface IconInputProps extends TextInputProps {
   icon: React.ComponentProps<typeof Ionicons>['name'];
@@ -57,7 +60,8 @@ interface FieldProps extends TextInputProps {
   error?: string | null;
 }
 
-export function Field({ label, required, hint, error, style, multiline, ...input }: FieldProps) {
+export function Field({ label, required, hint, error, style, multiline, onFocus, onBlur, ...input }: FieldProps) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>
@@ -67,7 +71,21 @@ export function Field({ label, required, hint, error, style, multiline, ...input
       <TextInput
         {...input}
         multiline={multiline}
-        style={[styles.input, multiline && styles.textArea, error ? styles.inputError : null, style]}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
+        style={[
+          styles.input,
+          multiline && styles.textArea,
+          focused && styles.inputFocused,
+          error ? styles.inputError : null,
+          style,
+        ]}
         placeholderTextColor={Colors.textMuted}
       />
       {error ? <Text style={styles.error}>{error}</Text> : hint ? <Text style={styles.hint}>{hint}</Text> : null}
@@ -113,6 +131,125 @@ export function Segmented<T extends string>({ label, options, value, onChange, h
         })}
       </View>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+    </View>
+  );
+}
+
+interface Choice<T extends string> {
+  value: T;
+  label: string;
+  icon?: IconName;
+  description?: string;
+}
+
+/** Side-by-side selectable cards (single choice), e.g. narration language. */
+export function ChoiceCards<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  options: Choice<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  hint?: string;
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.cardRow}>
+        {options.map((option) => {
+          const active = option.value === value;
+          return (
+            <Pressable
+              key={option.value}
+              onPress={() => onChange(option.value)}
+              style={({ pressed }) => [styles.choice, active && styles.choiceActive, pressed && styles.choicePressed]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
+            >
+              {option.icon ? <Ionicons name={option.icon} size={22} color={active ? Colors.primary : Colors.textSecondary} /> : null}
+              <Text style={[styles.choiceLabel, active && styles.choiceLabelActive]}>{option.label}</Text>
+              {option.description ? <Text style={styles.choiceDescription}>{option.description}</Text> : null}
+              <View style={[styles.radio, active && styles.radioActive]}>
+                {active ? <Ionicons name="checkmark" size={12} color={Colors.textOnPrimary} /> : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+    </View>
+  );
+}
+
+/** A field that opens a bottom-sheet list (single choice), e.g. genre. */
+export function SelectField<T extends string>({
+  label,
+  placeholder,
+  options,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  placeholder: string;
+  options: Choice<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  hint?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.value === value);
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable
+        onPress={() => setOpen(true)}
+        style={({ pressed }) => [styles.input, styles.select, (open || pressed) && styles.inputFocused]}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${selected?.label ?? placeholder}`}
+      >
+        {selected?.icon ? <Ionicons name={selected.icon} size={18} color={Colors.primary} /> : null}
+        <Text style={[styles.selectText, !selected && styles.selectPlaceholder]} numberOfLines={1}>
+          {selected?.label ?? placeholder}
+        </Text>
+        <Ionicons name="chevron-down" size={18} color={Colors.textSecondary} />
+      </Pressable>
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+
+      <ModalBottomSheet visible={open} onClose={() => setOpen(false)}>
+        <Text style={styles.sheetTitle}>{label}</Text>
+        <SheetScrollView maxHeight={440}>
+          {options.map((option) => {
+            const active = option.value === value;
+            return (
+              <Pressable
+                key={option.value || 'none'}
+                onPress={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                style={({ pressed }) => [styles.option, pressed && styles.optionPressed]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+              >
+                <View style={[styles.optionIcon, active && styles.optionIconActive]}>
+                  <Ionicons
+                    name={option.icon ?? 'remove-outline'}
+                    size={18}
+                    color={active ? Colors.primary : Colors.textSecondary}
+                  />
+                </View>
+                <Text style={[styles.optionText, active && styles.optionTextActive]}>{option.label}</Text>
+                {active ? <Ionicons name="checkmark" size={20} color={Colors.primary} /> : null}
+              </Pressable>
+            );
+          })}
+        </SheetScrollView>
+      </ModalBottomSheet>
     </View>
   );
 }
@@ -171,8 +308,112 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.base,
     color: Colors.textPrimary,
   },
+  inputFocused: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
   inputError: {
     borderColor: Colors.error,
+  },
+  select: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  selectText: {
+    flex: 1,
+    fontSize: FontSizes.base,
+    color: Colors.textPrimary,
+  },
+  selectPlaceholder: {
+    color: Colors.textMuted,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  choice: {
+    flex: 1,
+    minHeight: 84,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.surfaceElevated,
+    padding: Spacing.md,
+    gap: 4,
+  },
+  choiceActive: {
+    borderColor: Colors.primary,
+    borderWidth: 1.5,
+    backgroundColor: Colors.primarySurface,
+  },
+  choicePressed: {
+    opacity: 0.8,
+  },
+  choiceLabel: {
+    fontSize: FontSizes.base,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  choiceLabelActive: {
+    color: Colors.primaryDark,
+  },
+  choiceDescription: {
+    fontSize: FontSizes.xs,
+    color: Colors.textSecondary,
+  },
+  radio: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: Colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  sheetTitle: {
+    fontSize: FontSizes.lg,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: Spacing.sm,
+  },
+  option: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.surfaceBorder,
+  },
+  optionPressed: {
+    backgroundColor: Colors.surfaceElevated,
+  },
+  optionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.sm + 1,
+    backgroundColor: Colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionIconActive: {
+    backgroundColor: Colors.primarySurface,
+  },
+  optionText: {
+    flex: 1,
+    fontSize: FontSizes.base,
+    color: Colors.textPrimary,
+  },
+  optionTextActive: {
+    fontWeight: '700',
+    color: Colors.primary,
   },
   textArea: {
     minHeight: 88,

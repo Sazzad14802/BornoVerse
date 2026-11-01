@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     MAIL_FROM: str = ""
+    MAIL_FROM_NAME: str = "BornoVerse"
+    # Brevo transactional email API key (preferred over SMTP; Render's free plan blocks SMTP ports).
+    BREVO_API_KEY: str = ""
     RECOVERY_URL: str = "bornoverse://reset-password"
     # Send Expo push notifications for in-app notifications (disable in tests/offline dev).
     PUSH_NOTIFICATIONS_ENABLED: bool = True

@@ -156,6 +156,12 @@ export function ProfileScreen() {
             value={unreadCount ? tx(`${unreadCount}টি নতুন`, `${unreadCount} new`) : undefined}
             onPress={() => navigation.navigate('Notifications')}
           />
+          <ListRow
+            icon="shield-checkmark-outline"
+            title={tx('অ্যাকাউন্ট স্ট্যাটাস', 'Account status')}
+            subtitle={tx('মডারেশন নোটিশ ও আপিল', 'Moderation notices and appeals')}
+            onPress={() => navigation.navigate('AccountStatus')}
+          />
           <ListRow icon="receipt-outline" title={tx('পেমেন্ট ইতিহাস', 'Payment history')} onPress={() => navigation.navigate('Subscription')} />
           <ListRow icon="create-outline" title={tx('নাম পরিবর্তন', 'Edit name')} value={displayName} onPress={() => setEditingName(true)} last />
         </FormCard>

@@ -66,12 +66,24 @@ class Audit(Base, UUIDPrimaryKeyMixin):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class Report(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """A listener's report on an audiobook; also the moderation case for it.
+
+    status: pending -> under_review -> action_taken -> appealed -> resolved,
+    or dismissed. One report per listener per audiobook.
+    """
     __tablename__ = "content_reports"
+    __table_args__ = (UniqueConstraint("user_id", "audiobook_id", name="uq_report_once_per_user"),)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     audiobook_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("audiobooks.id"))
     reason: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(20), default="open")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
     resolution: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(30), default="other")
+    details: Mapped[str] = mapped_column(Text, default="")
+    # The content owner at report time (kept if the audiobook is deleted later).
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
+    violation: Mapped[Optional[str]] = mapped_column(String(30))
+    appeal_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 class Quota(Base):
     __tablename__ = "generation_quotas"
@@ -127,6 +139,9 @@ class Playlist(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "playlists"
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(150))
+    # Set for a publisher's channel playlist (public on the channel page);
+    # empty for a listener's private playlist.
+    channel_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("channels.id", ondelete="CASCADE"), index=True)
 
 class PlaylistBook(Base):
     __tablename__ = "playlist_books"
@@ -139,6 +154,10 @@ class RecoveryToken(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used: Mapped[bool] = mapped_column(Boolean, default=False)
+    # "code": the 6-digit code emailed to the user; "reset": the token that code is exchanged for.
+    kind: Mapped[str] = mapped_column(String(10), default="reset")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class FinancialAdjustment(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "financial_adjustments"

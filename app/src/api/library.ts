@@ -27,12 +27,13 @@ export const libraryApi = {
 };
 
 export const playlistsApi = {
-  list(): Promise<Playlist[]> {
-    return apiClient.get<Playlist[]>('/playlists');
+  /** The listener's own playlists, or (scope 'channel') their channel's public playlists. */
+  list(scope: 'personal' | 'channel' = 'personal'): Promise<Playlist[]> {
+    return apiClient.get<Playlist[]>(`/playlists?scope=${scope}`);
   },
 
-  create(name: string): Promise<Playlist> {
-    return apiClient.post<Playlist>('/playlists', { name });
+  create(name: string, channel = false): Promise<Playlist> {
+    return apiClient.post<Playlist>('/playlists', { name, channel });
   },
 
   remove(playlistId: string): Promise<unknown> {

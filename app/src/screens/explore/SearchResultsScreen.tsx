@@ -11,6 +11,8 @@ import { RouteProp, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { AudiobookCard } from '../../components/AudiobookCard';
 import { CatalogFilters, DEFAULT_FILTERS, filterQuery, isFiltered } from '../../components/CatalogFilters';
+import { ChannelRow } from '../../components/ChannelRow';
+import { ChannelSummary, socialApi } from '../../api/social';
 import { StateView } from '../../components/StateView';
 import { audiobooksApi } from '../../api/audiobooks';
 import { errorMessage } from '../../api/client';
@@ -38,6 +40,7 @@ export function SearchResultsScreen() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [recent, setRecent] = useState<string[]>([]);
+  const [channels, setChannels] = useState<ChannelSummary[]>([]);
   const latest = useRef(0);
 
   const term = query.trim();
@@ -58,12 +61,16 @@ export function SearchResultsScreen() {
     setStatus('loading');
     const timer = setTimeout(async () => {
       try {
-        const page = await audiobooksApi.list({
-          ...filterQuery(filters),
-          q: term.length >= MIN_LENGTH ? term : undefined,
-          size: 40,
-        });
+        const [page, matchedChannels] = await Promise.all([
+          audiobooksApi.list({
+            ...filterQuery(filters),
+            q: term.length >= MIN_LENGTH ? term : undefined,
+            size: 40,
+          }),
+          term.length >= MIN_LENGTH ? socialApi.channels(term).catch(() => []) : Promise.resolve([]),
+        ]);
         if (requestId !== latest.current) return;
+        setChannels(matchedChannels.slice(0, 5));
         setResults(page.items);
         setTotal(page.total);
         setStatus('done');
@@ -174,8 +181,26 @@ export function SearchResultsScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         ListHeaderComponent={
-          active && status === 'done' && results.length ? (
-            <Text style={styles.count}>{tx(`${total}টি ফলাফল`, `${total} ${total === 1 ? 'result' : 'results'}`)}</Text>
+          active && status === 'done' ? (
+            <View>
+              {channels.length ? (
+                <View style={styles.channels}>
+                  <Text style={styles.count}>{tx('চ্যানেল', 'Channels')}</Text>
+                  {channels.map((channel, i) => (
+                    <ChannelRow
+                      key={channel.id}
+                      channel={channel}
+                      last={i === channels.length - 1}
+                      onPress={() => navigation.navigate('ChannelProfile', { channelId: channel.id })}
+                      onChange={(next) => setChannels((list) => list.map((c) => (c.id === next.id ? next : c)))}
+                    />
+                  ))}
+                </View>
+              ) : null}
+              {results.length ? (
+                <Text style={styles.count}>{tx(`${total}টি অডিওবুক`, `${total} ${total === 1 ? 'audiobook' : 'audiobooks'}`)}</Text>
+              ) : null}
+            </View>
           ) : null
         }
         renderItem={({ item }) => (
@@ -257,6 +282,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  channels: {
+    marginBottom: Spacing.md,
   },
   recent: {
     paddingTop: Spacing.xs,

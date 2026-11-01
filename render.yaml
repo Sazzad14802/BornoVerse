@@ -52,3 +52,8 @@ services:
         value: "true"
       - key: MOCK_PAYMENTS_ENABLED
         value: "false"
+      # Password-reset emails (Brevo HTTP API; SMTP ports are blocked on the free plan)
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false

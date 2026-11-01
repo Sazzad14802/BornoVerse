@@ -4,12 +4,14 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { AudiobookCard } from '../../components/AudiobookCard';
 import { CatalogFilters, DEFAULT_FILTERS, filterQuery, isFiltered } from '../../components/CatalogFilters';
+import { ChannelTile } from '../../components/ChannelRow';
+import { socialApi } from '../../api/social';
 import { StateView } from '../../components/StateView';
 import { AppButton } from '../../components/AppButton';
 import { audiobooksApi } from '../../api/audiobooks';
@@ -41,6 +43,7 @@ export function ExploreScreen() {
     return audiobooksApi.list({ ...filters, page: 1, size: PAGE_SIZE });
   }, [filterValues]);
 
+  const channels = useResource(() => socialApi.channels().catch(() => []), []);
   const books = [...(first.data?.items ?? []), ...extra];
   const hasMore = !!first.data && page < first.data.pages;
 
@@ -78,6 +81,22 @@ export function ExploreScreen() {
         <Text style={styles.searchPlaceholder}>{t('searchPlaceholder')}</Text>
       </Pressable>
 
+      {channels.data?.length ? (
+        <View style={styles.channels}>
+          <Text style={styles.sectionTitle}>{tx('চ্যানেল', 'Channels')}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.channelShelf}>
+            {channels.data.map((channel) => (
+              <ChannelTile
+                key={channel.id}
+                channel={channel}
+                onPress={() => navigation.navigate('ChannelProfile', { channelId: channel.id })}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
+      <Text style={styles.sectionTitle}>{tx('অডিওবুক', 'Audiobooks')}</Text>
       <CatalogFilters value={filterValues} onChange={setFilterValues} />
       {first.data ? (
         <Text style={styles.count}>{tx(`${first.data.total}টি অডিওবুক`, `${first.data.total} audiobooks`)}</Text>
@@ -166,6 +185,19 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FontSizes.base,
     color: Colors.textSecondary,
+  },
+  channels: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  channelShelf: {
+    gap: Spacing.md,
+    paddingRight: Spacing.md,
+  },
+  sectionTitle: {
+    fontSize: FontSizes.base,
+    fontWeight: '700',
+    color: Colors.textPrimary,
   },
   count: {
     fontSize: FontSizes.xs,

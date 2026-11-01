@@ -26,6 +26,17 @@ export async function pickDocument(kind: 'pdf' | 'mp3' | 'any' = 'pdf'): Promise
   return fromDocument(result.assets[0], MAX_DOCUMENT_MB);
 }
 
+/** Supporting evidence for a report or an appeal: a PDF or an image (max 10 MB). */
+export async function pickEvidence(): Promise<PickedFile | null> {
+  const result = await DocumentPicker.getDocumentAsync({
+    type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+    copyToCacheDirectory: true,
+    multiple: false,
+  });
+  if (result.canceled || !result.assets?.length) return null;
+  return fromDocument(result.assets[0], 10);
+}
+
 /** One or more MP3 files, in the order the user picked them. */
 export async function pickAudioFiles(): Promise<PickedFile[]> {
   const result = await DocumentPicker.getDocumentAsync({ type: ['audio/mpeg', 'audio/mp3'], copyToCacheDirectory: true, multiple: true });

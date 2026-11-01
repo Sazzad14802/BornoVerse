@@ -9,6 +9,10 @@ export interface Playlist {
   id: string;
   user_id: string;
   name: string;
+  /** Set for a publisher's channel playlist. */
+  channel_id?: string | null;
+  /** Number of audiobooks in it. */
+  count?: number;
   created_at: string;
 }
 

@@ -52,7 +52,7 @@ async def test_other_decisions_need_no_reason(client, db_session, admin):
 async def test_attention_counts_pending_work(client, admin):
     _, headers = await account(client)
     assert (await client.get('/api/v1/admin/attention', headers=admin)).json() == {
-        "applications": 0, "reports": 0, "withdrawals": 0}
+        "applications": 0, "reports": 0, "appeals": 0, "withdrawals": 0}
     await apply(client, headers)
     counts = (await client.get('/api/v1/admin/attention', headers=admin)).json()
     assert counts["applications"] == 1

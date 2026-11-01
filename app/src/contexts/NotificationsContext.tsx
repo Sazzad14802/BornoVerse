@@ -52,9 +52,12 @@ async function ensureAndroidChannel() {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('default', {
       name: 'BornoVerse',
+      description: 'New audiobooks, generation updates, payments and account notices',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 200, 120, 200],
-      lightColor: '#13AD81',
+      lightColor: '#0C7F5F',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      showBadge: true,
     });
   }
 }

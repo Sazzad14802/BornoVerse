@@ -2,7 +2,7 @@
  * Audiobook repository: catalog discovery, owner CRUD, uploads and chapters.
  */
 
-import { apiClient } from './client';
+import { apiClient, UploadOptions } from './client';
 import {
   Audiobook,
   AudiobookCreate,
@@ -52,8 +52,8 @@ export const audiobooksApi = {
     return apiClient.patch<Audiobook>(`/audiobooks/${id}/visibility`, { visibility });
   },
 
-  uploadSource(id: string, file: PickedFile): Promise<Audiobook> {
-    return apiClient.uploadFile<Audiobook>(`/audiobooks/${id}/source`, toFormData(file, 'application/pdf'));
+  uploadSource(id: string, file: PickedFile, options?: UploadOptions): Promise<Audiobook> {
+    return apiClient.uploadFile<Audiobook>(`/audiobooks/${id}/source`, toFormData(file, 'application/pdf'), true, options);
   },
 
   /** Finished narration (publishers): each MP3, in order, becomes one chapter. */

@@ -1,13 +1,11 @@
 import asyncio
 import hashlib
 import secrets
-import smtplib
-from email.message import EmailMessage
 from datetime import datetime, timezone, timedelta
 import jwt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from app.api.deps import DatabaseDep, CurrentUserDep
 from app.core.config import settings
 from app.core.security import hash_password
@@ -37,38 +35,94 @@ async def logout(db: DatabaseDep, user: CurrentUserDep):
 class RecoveryRequest(BaseModel):
     email: str = Field(max_length=255)
 
+class VerifyRequest(BaseModel):
+    email: str = Field(max_length=255)
+    code: str = Field(pattern=r"^\d{6}$")
+
 class ResetRequest(BaseModel):
     token: str = Field(min_length=20, max_length=200)
     password: str = Field(min_length=6, max_length=72)
 
-def send_recovery(email, token):
-    message = EmailMessage()
-    message["From"], message["To"], message["Subject"] = settings.MAIL_FROM, email, "Reset your BornoVerse password"
-    message.set_content(f"Your one-time reset code (expires in 20 minutes):\n{token}\n\nOpen BornoVerse > Forgot password > Reset with code.")
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
-        smtp.starttls()
-        if settings.SMTP_USER:
-            smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        smtp.send_message(message)
+CODE_MINUTES = 10
+CODE_ATTEMPTS = 5
+RESEND_SECONDS = 45
+
+def digest(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+def recovery_email(code: str) -> tuple[str, str]:
+    text = (f"Your BornoVerse verification code is {code}.\n\n"
+            f"It expires in {CODE_MINUTES} minutes. If you did not ask to reset your password, ignore this email.")
+    html = (f"<div style=\"font-family:Arial,sans-serif;max-width:420px\"><h2 style=\"color:#0C7F5F\">BornoVerse</h2>"
+            f"<p>Your verification code is</p><p style=\"font-size:30px;font-weight:700;letter-spacing:6px\">{code}</p>"
+            f"<p style=\"color:#55675F\">It expires in {CODE_MINUTES} minutes. If you did not ask to reset your password, "
+            f"you can ignore this email.</p></div>")
+    return text, html
 
 @router.post("/recovery")
 async def recover(data: RecoveryRequest, db: DatabaseDep):
-    if not settings.SMTP_HOST:
+    """Email a 6-digit code. The reply never reveals whether the account exists."""
+    from app.services.mail_service import MailNotConfigured, mail_configured, send_mail
+    dev_mode = settings.ENVIRONMENT != "production"
+    if not mail_configured() and not dev_mode:
         raise HTTPException(503, "Password recovery email is not configured")
+    response = {"message": "If this account exists, a verification code has been sent.",
+                "expires_in": CODE_MINUTES * 60, "resend_after": RESEND_SECONDS}
     user = await get_user_by_email(db, data.email.strip().lower())
-    if user and user.account_type == "user":
-        token = secrets.token_urlsafe(32)
-        db.add(RecoveryToken(digest=hashlib.sha256(token.encode()).hexdigest(), user_id=user.id,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=20)))
-        await asyncio.to_thread(send_recovery, user.email, token)
+    if not user or user.account_type != "user":
+        return response
+    now = datetime.now(timezone.utc)
+    latest = await db.scalar(select(RecoveryToken).where(RecoveryToken.user_id == user.id, RecoveryToken.kind == "code")
+                             .order_by(RecoveryToken.created_at.desc()).limit(1))
+    if latest and latest.created_at and utc(latest.created_at) > now - timedelta(seconds=RESEND_SECONDS):
+        raise HTTPException(429, f"Please wait {RESEND_SECONDS} seconds before requesting another code")
+    # Only the newest code is valid; earlier ones are discarded.
+    await db.execute(delete(RecoveryToken).where(RecoveryToken.user_id == user.id, RecoveryToken.kind == "code"))
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db.add(RecoveryToken(digest=digest(f"{user.id}:{code}"), user_id=user.id, kind="code",
+                         expires_at=now + timedelta(minutes=CODE_MINUTES), created_at=now))
+    if mail_configured():
+        text, html = recovery_email(code)
+        try:
+            await send_mail(user.email, "Your BornoVerse verification code", text, html)
+        except MailNotConfigured:
+            raise HTTPException(503, "Password recovery email is not configured")
+    elif dev_mode:
+        # Local development without an email provider: hand the code back.
+        response["dev_code"] = code
+    await db.commit()
+    return response
+
+@router.post("/recovery/verify")
+async def verify_code(data: VerifyRequest, db: DatabaseDep):
+    """Exchange a valid code for a one-time reset token (15 minutes)."""
+    invalid = HTTPException(400, "Invalid or expired code")
+    user = await get_user_by_email(db, data.email.strip().lower())
+    if not user:
+        raise invalid
+    row = await db.scalar(select(RecoveryToken).where(RecoveryToken.user_id == user.id, RecoveryToken.kind == "code",
+                          RecoveryToken.used.is_(False)).order_by(RecoveryToken.created_at.desc()).limit(1).with_for_update())
+    if not row or utc(row.expires_at) <= datetime.now(timezone.utc):
+        raise invalid
+    if row.digest != digest(f"{user.id}:{data.code}"):
+        row.attempts += 1
+        if row.attempts >= CODE_ATTEMPTS:
+            row.used = True
         await db.commit()
-    return {"message": "If this account exists, a recovery email has been sent."}
+        raise HTTPException(400, "Too many attempts. Request a new code." if row.used else "Incorrect code")
+    row.used = True
+    token = secrets.token_urlsafe(32)
+    db.add(RecoveryToken(digest=digest(token), user_id=user.id, kind="reset",
+                         expires_at=datetime.now(timezone.utc) + timedelta(minutes=15)))
+    await db.commit()
+    return {"token": token}
 
 @router.post("/reset-password")
 async def reset(data: ResetRequest, db: DatabaseDep):
     if len(data.password.encode()) > 72:
         raise HTTPException(422, "Password exceeds 72 UTF-8 bytes")
-    row = await db.scalar(select(RecoveryToken).where(RecoveryToken.digest == hashlib.sha256(data.token.encode()).hexdigest()).with_for_update())
+    row = await db.scalar(select(RecoveryToken).where(RecoveryToken.digest == digest(data.token),
+                          RecoveryToken.kind == "reset").with_for_update())
     if not row or row.used or utc(row.expires_at) <= datetime.now(timezone.utc):
         raise HTTPException(400, "Invalid or expired recovery code")
     user = await db.get(User, row.user_id)

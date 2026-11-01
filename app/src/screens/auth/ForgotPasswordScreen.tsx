@@ -1,232 +1,274 @@
 /**
- * ForgotPasswordScreen — password recovery in steps: email, verify, reset, done.
- * Connected to live backend: /api/v1/auth/recovery & /api/v1/auth/reset-password.
+ * ForgotPasswordScreen — reset a password in three steps:
+ * 1. email → a 6-digit code is emailed,
+ * 2. enter the code (with a resend countdown),
+ * 3. choose a new password (typed twice).
+ * Afterwards the user signs in again with the new password.
  */
 
-import React, { useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { Ionicons } from '@expo/vector-icons';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { AuthStackParamList } from '../../navigation/types';
-import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
 import { IconInput } from '../../components/Form';
-import { Colors, FontSizes, Radius, Spacing } from '../../theme';
+import { authApi } from '../../api/auth';
+import { ApiError, errorMessage } from '../../api/client';
 import { useLanguage } from '../../contexts/LanguageContext';
-import { apiClient } from '../../api/client';
+import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'ForgotPassword'>;
+type Step = 'email' | 'code' | 'password' | 'done';
+
+const CODE_LENGTH = 6;
+
+/** Six boxes over one hidden input, so paste and the SMS/email autofill work. */
+function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const input = useRef<TextInput>(null);
+  const [focused, setFocused] = useState(false);
+  return (
+    <Pressable style={styles.codeRow} onPress={() => input.current?.focus()} accessibilityLabel="Verification code">
+      {Array.from({ length: CODE_LENGTH }, (_, i) => {
+        const active = focused && (i === value.length || (i === CODE_LENGTH - 1 && value.length === CODE_LENGTH));
+        return (
+          <View key={i} style={[styles.codeBox, value[i] ? styles.codeBoxFilled : null, active && styles.codeBoxActive]}>
+            <Text style={styles.codeDigit}>{value[i] ?? ''}</Text>
+          </View>
+        );
+      })}
+      <TextInput
+        ref={input}
+        value={value}
+        onChangeText={(text) => onChange(text.replace(/\D/g, '').slice(0, CODE_LENGTH))}
+        keyboardType="number-pad"
+        textContentType="oneTimeCode"
+        autoComplete="one-time-code"
+        maxLength={CODE_LENGTH}
+        autoFocus
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={styles.hiddenInput}
+      />
+    </Pressable>
+  );
+}
 
 export function ForgotPasswordScreen() {
   const nav = useNavigation<Nav>();
-  const { t, isEnglish } = useLanguage();
+  const { tx } = useLanguage();
 
+  const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  
-  const [step, setStep] = useState<1 | 2 | 3>(1); // 1 = Enter Email, 2 = Verify & New Password, 3 = Success
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [infoMessage, setInfoMessage] = useState('');
+  const [code, setCode] = useState('');
+  const [token, setToken] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [resendIn, setResendIn] = useState(0);
 
-  const handleSendCode = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      setErrorMessage(isEnglish ? 'Please enter a valid email address.' : 'সঠিক ইমেইল ঠিকানা লিখুন।');
-      return;
-    }
-    setErrorMessage('');
-    setIsSubmitting(true);
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendIn]);
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
     try {
-      await apiClient.post('/auth/recovery', {
-        email: email.trim().toLowerCase(),
-      });
-      setInfoMessage(
-        isEnglish
-          ? 'If the account exists, a recovery code has been sent. Check your email.'
-          : 'অ্যাকাউন্টটি থাকলে একটি রিকভারি কোড ইমেইলে পাঠানো হয়েছে।'
-      );
-      setStep(2);
-    } catch (err: any) {
-      setErrorMessage(err.detail || err.message || 'Could not send recovery email.');
+      await action();
+    } catch (e) {
+      if (e instanceof ApiError && e.isNetworkError) {
+        setError(tx('সার্ভারে সংযোগ করা যায়নি। আবার চেষ্টা করুন।', 'Could not reach the server. Try again.'));
+      } else {
+        setError(errorMessage(e));
+      }
     } finally {
-      setIsSubmitting(false);
+      setBusy(false);
     }
   };
 
-  const handleResetPassword = async () => {
-    if (!verificationCode.trim()) {
-      setErrorMessage(isEnglish ? 'Please enter the verification code.' : 'ভেরিফিকেশন কোডটি লিখুন।');
-      return;
-    }
-    if (newPassword.length < 6) {
-      setErrorMessage(isEnglish ? 'Password must be at least 6 characters.' : 'পাসওয়ার্ড অন্তত ৬ অক্ষরের হতে হবে।');
-      return;
-    }
-    setErrorMessage('');
-    setIsSubmitting(true);
-    try {
-      await apiClient.post('/auth/reset-password', {
-        token: verificationCode.trim(),
-        password: newPassword,
-      });
-      setStep(3);
-    } catch (err: any) {
-      setErrorMessage(err.detail || err.message || 'Invalid or expired recovery code.');
-    } finally {
-      setIsSubmitting(false);
-    }
+  const sendCode = () =>
+    run(async () => {
+      const clean = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) throw new Error(tx('সঠিক ইমেইল ঠিকানা লিখুন।', 'Enter a valid email address.'));
+      const reply = await authApi.requestRecovery(clean);
+      setResendIn(reply.resend_after || 45);
+      setCode(reply.dev_code ?? '');
+      setInfo(
+        reply.dev_code
+          ? tx('ডেভেলপমেন্ট সার্ভার: কোডটি স্বয়ংক্রিয়ভাবে বসানো হয়েছে।', 'Development server: the code was filled in for you.')
+          : null,
+      );
+      setStep('code');
+    });
+
+  const verify = () =>
+    run(async () => {
+      if (code.length !== CODE_LENGTH) throw new Error(tx('৬ অঙ্কের কোডটি লিখুন।', 'Enter the 6-digit code.'));
+      const reply = await authApi.verifyRecoveryCode(email, code);
+      setToken(reply.token);
+      setInfo(null);
+      setStep('password');
+    });
+
+  const reset = () =>
+    run(async () => {
+      if (password.length < 6) throw new Error(tx('পাসওয়ার্ড অন্তত ৬ অক্ষরের হতে হবে।', 'Password must be at least 6 characters.'));
+      if (password !== confirm) throw new Error(tx('দুটি পাসওয়ার্ড মেলেনি।', 'The passwords do not match.'));
+      await authApi.resetPassword(token, password);
+      setStep('done');
+    });
+
+  const content: Record<Step, { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; subtitle: string }> = {
+    email: {
+      icon: 'finger-print-outline',
+      title: tx('পাসওয়ার্ড ভুলে গেছেন?', 'Forgot your password?'),
+      subtitle: tx('অ্যাকাউন্টের ইমেইল দিন, আমরা একটি যাচাই কোড পাঠাব।', 'Enter your account email and we will send you a verification code.'),
+    },
+    code: {
+      icon: 'mail-outline',
+      title: tx('ইমেইল যাচাই করুন', 'Verify your email'),
+      subtitle: tx(`${email.trim()}-এ পাঠানো ৬ অঙ্কের কোডটি লিখুন`, `Enter the 6-digit code sent to ${email.trim()}`),
+    },
+    password: {
+      icon: 'lock-open-outline',
+      title: tx('নতুন পাসওয়ার্ড দিন', 'Set a new password'),
+      subtitle: tx('এমন পাসওয়ার্ড বেছে নিন যা আগে ব্যবহার করেননি।', 'Choose a password you have not used before.'),
+    },
+    done: {
+      icon: 'checkmark-circle-outline',
+      title: tx('পাসওয়ার্ড বদলানো হয়েছে', 'Password changed'),
+      subtitle: tx('নতুন পাসওয়ার্ড দিয়ে সাইন ইন করুন।', 'Sign in with your new password.'),
+    },
+  };
+  const { icon, title, subtitle } = content[step];
+
+  const goBack = () => {
+    setError(null);
+    if (step === 'code') setStep('email');
+    else if (step === 'password') setStep('code');
+    else nav.goBack();
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <AppHeader
-        title={t('forgotHeaderTitle')}
-        subtitle={t('forgotHeaderSub')}
-        onBack={() => nav.goBack()}
-      />
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      <View style={styles.topBar}>
+        {step !== 'done' ? (
+          <Pressable onPress={goBack} hitSlop={12} style={styles.back} accessibilityRole="button" accessibilityLabel={tx('ফিরে যান', 'Go back')}>
+            <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
+          </Pressable>
+        ) : (
+          <View style={styles.back} />
+        )}
+        <Text style={styles.brand}>BornoVerse</Text>
+        <View style={styles.back} />
+      </View>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* 4-Step Indicator Bar */}
-          <View style={styles.stepIndicatorRow}>
-            <View style={styles.stepColumn}>
-              <View style={[styles.stepBar, styles.stepBarActive]} />
-              <Text style={[styles.stepText, styles.stepTextActive]}>{t('forgotStepEmail')}</Text>
-            </View>
-
-            <View style={styles.stepColumn}>
-              <View style={[styles.stepBar, step >= 2 && styles.stepBarActive]} />
-              <Text style={[styles.stepText, step >= 2 && styles.stepTextActive]}>{t('forgotStepVerify')}</Text>
-            </View>
-
-            <View style={styles.stepColumn}>
-              <View style={[styles.stepBar, step >= 2 && styles.stepBarActive]} />
-              <Text style={[styles.stepText, step >= 2 && styles.stepTextActive]}>{t('forgotStepReset')}</Text>
-            </View>
-
-            <View style={styles.stepColumn}>
-              <View style={[styles.stepBar, step === 3 && styles.stepBarActive]} />
-              <Text style={[styles.stepText, step === 3 && styles.stepTextActive]}>{t('forgotStepSuccess')}</Text>
-            </View>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <View style={styles.iconBox}>
+            <Ionicons name={icon} size={26} color={Colors.primary} />
           </View>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.subtitle}>{subtitle}</Text>
 
-          {/* Form Fields */}
-          <View style={styles.fieldsContainer}>
-            {step === 1 && (
-              <View style={styles.fieldWrapper}>
-                <Text style={styles.fieldLabel}>{t('forgotEmailLabel')}</Text>
-                <IconInput
-                  icon="mail-outline"
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder={isEnglish ? 'Email' : 'ইমেইল'}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                />
-              </View>
-            )}
+          <View style={styles.form}>
+            {step === 'email' ? (
+              <IconInput
+                icon="mail-outline"
+                placeholder={tx('আপনার ইমেইল', 'Enter your email')}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+                autoFocus
+                returnKeyType="send"
+                onSubmitEditing={sendCode}
+              />
+            ) : null}
 
-            {step === 2 && (
+            {step === 'code' ? <CodeInput value={code} onChange={setCode} /> : null}
+
+            {step === 'password' ? (
               <>
-                <View style={styles.fieldWrapper}>
-                  <Text style={styles.fieldLabel}>{t('forgotVerifyCodeLabel')}</Text>
-                  <IconInput
-                    icon="key-outline"
-                    value={verificationCode}
-                    onChangeText={setVerificationCode}
-                    placeholder={isEnglish ? 'Code from the email' : 'ইমেইলে পাওয়া কোড'}
-                    autoCapitalize="none"
-                  />
-                </View>
-
-                <View style={styles.fieldWrapper}>
-                  <Text style={styles.fieldLabel}>{t('forgotNewPasswordLabel')}</Text>
-                  <IconInput
-                    icon="lock-closed-outline"
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    placeholder={isEnglish ? 'At least 6 characters' : 'অন্তত ৬ অক্ষর'}
-                    secret
-                    autoCapitalize="none"
-                    autoComplete="new-password"
-                  />
-                </View>
+                <IconInput
+                  icon="lock-closed-outline"
+                  placeholder={tx('নতুন পাসওয়ার্ড', 'New password')}
+                  value={password}
+                  onChangeText={setPassword}
+                  secret
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  autoFocus
+                />
+                <IconInput
+                  icon="lock-closed-outline"
+                  placeholder={tx('পাসওয়ার্ড আবার লিখুন', 'Confirm your password')}
+                  value={confirm}
+                  onChangeText={setConfirm}
+                  secret
+                  autoCapitalize="none"
+                  autoComplete="new-password"
+                  returnKeyType="done"
+                  onSubmitEditing={reset}
+                />
               </>
+            ) : null}
+
+            {info ? (
+              <View style={styles.infoBox}>
+                <Ionicons name="information-circle-outline" size={18} color={Colors.tintBlueText} />
+                <Text style={styles.infoText}>{info}</Text>
+              </View>
+            ) : null}
+            {error ? (
+              <View style={styles.errorBox} accessibilityLiveRegion="polite">
+                <Ionicons name="alert-circle-outline" size={18} color={Colors.tintErrorText} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            {step === 'email' ? (
+              <AppButton label={tx('কোড পাঠান', 'Send code')} onPress={sendCode} isLoading={busy} />
+            ) : step === 'code' ? (
+              <AppButton label={tx('যাচাই করুন', 'Continue')} onPress={verify} isLoading={busy} disabled={code.length !== CODE_LENGTH} />
+            ) : step === 'password' ? (
+              <>
+                <AppButton label={tx('পাসওয়ার্ড বদলান', 'Continue')} onPress={reset} isLoading={busy} />
+                <AppButton label={tx('বাতিল', 'Cancel')} variant="secondary" onPress={() => nav.navigate('Login')} />
+              </>
+            ) : (
+              <AppButton label={tx('সাইন ইন', 'Sign in')} onPress={() => nav.navigate('Login')} />
             )}
           </View>
 
-          {/* Messages */}
-          {errorMessage ? (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            </View>
+          {step === 'email' ? (
+            <Pressable onPress={() => nav.navigate('Login')} hitSlop={8} style={styles.footer} accessibilityRole="link">
+              <Text style={styles.footerText}>{tx('সাইন ইন পাতায় ফিরে যান', 'Back to sign in')}</Text>
+            </Pressable>
           ) : null}
 
-          {infoMessage ? (
-            <View style={styles.verificationBanner}>
-              <Text style={styles.verificationTitle}>{t('forgotBannerTitle')}</Text>
-              <Text style={styles.verificationSub}>{infoMessage}</Text>
+          {step === 'code' ? (
+            <View style={styles.footerRow}>
+              <Text style={styles.footerMuted}>{tx('কোড পাননি?', "Didn't receive a code?")}</Text>
+              {resendIn > 0 ? (
+                <Text style={styles.footerMuted}>{tx(`${resendIn} সেকেন্ড পর আবার পাঠান`, `Resend in ${resendIn}s`)}</Text>
+              ) : (
+                <Pressable onPress={sendCode} hitSlop={8} disabled={busy} accessibilityRole="button">
+                  <Text style={styles.footerText}>{tx('আবার পাঠান', 'Resend code')}</Text>
+                </Pressable>
+              )}
             </View>
           ) : null}
-
-          {/* CTA Buttons */}
-          {step === 1 && (
-            <AppButton
-              label={isEnglish ? 'Send Recovery Code' : 'রিকভারি কোড পাঠান'}
-              onPress={handleSendCode}
-              variant="primary"
-              isLoading={isSubmitting}
-            />
-          )}
-
-          {step === 2 && (
-            <AppButton
-              label={t('btnChangePassword')}
-              onPress={handleResetPassword}
-              variant="primary"
-              isLoading={isSubmitting}
-            />
-          )}
-
-          {/* Success State */}
-          {step === 3 && (
-            <View style={styles.successBanner}>
-              <Text style={styles.successTitle}>{t('forgotSuccessTitle')}</Text>
-              <Text style={styles.successSub}>
-                {isEnglish
-                  ? 'Your password has been reset successfully. Please sign in with your new password.'
-                  : 'পাসওয়ার্ড সফলভাবে পরিবর্তিত হয়েছে। নতুন পাসওয়ার্ড দিয়ে সাইন ইন করুন।'}
-              </Text>
-              <View style={{ marginTop: Spacing.md }}>
-                <AppButton
-                  label={t('tabSignIn')}
-                  onPress={() => nav.navigate('Login')}
-                  variant="primary"
-                />
-              </View>
-            </View>
-          )}
         </ScrollView>
       </KeyboardAvoidingView>
-
     </SafeAreaView>
   );
 }
@@ -234,117 +276,138 @@ export function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.surface,
   },
-  scrollContent: {
-    paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.xs,
-    paddingBottom: Spacing.xl,
-    gap: Spacing.md,
-  },
-  stepIndicatorRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginVertical: Spacing.xs,
-  },
-  stepColumn: {
+  flex: {
     flex: 1,
   },
-  stepBar: {
-    height: 3,
-    backgroundColor: Colors.track,
-    borderRadius: Radius.full,
-    marginBottom: 4,
-  },
-  stepBarActive: {
-    backgroundColor: Colors.primary,
-  },
-  stepText: {
-    fontSize: FontSizes.xs - 1,
-    color: Colors.textSecondary,
-  },
-  stepTextActive: {
-    color: Colors.primary,
-    fontWeight: '700',
-  },
-  fieldsContainer: {
-    gap: Spacing.sm + 4,
-  },
-  fieldWrapper: {
-    gap: 4,
-  },
-  fieldLabel: {
-    fontSize: FontSizes.xs + 1,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  textInput: {
-    height: 50,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    fontSize: FontSizes.base,
-    color: Colors.textPrimary,
-  },
-  passwordRow: {
-    height: 50,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    borderRadius: Radius.md,
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: Spacing.md,
+    height: 52,
   },
-  passwordInput: {
-    flex: 1,
-    height: '100%',
+  back: {
+    width: 32,
+  },
+  brand: {
     fontSize: FontSizes.base,
+    fontWeight: '700',
     color: Colors.textPrimary,
   },
-  eyeButton: {
-    padding: Spacing.xs,
+  content: {
+    flexGrow: 1,
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg + 4,
+    paddingTop: Spacing['2xl'],
+    paddingBottom: Spacing.xl,
   },
-  errorBanner: {
-    backgroundColor: Colors.tintError,
+  iconBox: {
+    width: 56,
+    height: 56,
     borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
+  title: {
+    fontSize: FontSizes['2xl'],
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    marginTop: Spacing.sm,
+    fontSize: FontSizes.sm,
+    lineHeight: 20,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
+  form: {
+    alignSelf: 'stretch',
+    gap: Spacing.md,
+    marginTop: Spacing.xl,
+  },
+  codeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+  },
+  codeBox: {
+    flex: 1,
+    height: 54,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  codeBoxFilled: {
+    backgroundColor: Colors.surface,
+  },
+  codeBoxActive: {
+    borderColor: Colors.primary,
+    borderWidth: 1.5,
+  },
+  codeDigit: {
+    fontSize: FontSizes.xl,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  hiddenInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: Colors.tintBlue,
+    borderRadius: Radius.sm + 2,
+    padding: Spacing.md,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    color: Colors.tintBlueText,
+  },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    backgroundColor: Colors.tintError,
+    borderRadius: Radius.sm + 2,
     padding: Spacing.md,
   },
   errorText: {
-    fontSize: FontSizes.xs,
+    flex: 1,
+    fontSize: FontSizes.sm,
     color: Colors.tintErrorText,
+  },
+  footer: {
+    marginTop: Spacing.xl,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: Spacing.xl,
+  },
+  footerMuted: {
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+  },
+  footerText: {
+    fontSize: FontSizes.sm,
     fontWeight: '600',
-  },
-  verificationBanner: {
-    backgroundColor: Colors.tintGreen,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-  },
-  verificationTitle: {
-    fontSize: FontSizes.xs + 1,
-    fontWeight: '700',
-    color: Colors.tintGreenText,
-    marginBottom: 2,
-  },
-  verificationSub: {
-    fontSize: FontSizes.xs,
-    color: Colors.tintGreenText,
-  },
-  successBanner: {
-    backgroundColor: Colors.tintGreen,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-  },
-  successTitle: {
-    fontSize: FontSizes.xs + 1,
-    fontWeight: '700',
-    color: Colors.tintGreenText,
-    marginBottom: 2,
-  },
-  successSub: {
-    fontSize: FontSizes.xs,
-    color: Colors.tintGreenText,
+    color: Colors.primary,
   },
 });

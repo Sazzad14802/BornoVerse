@@ -33,6 +33,9 @@ def is_publisher(user):
 def publishing(user):
     if not is_publisher(user):
         raise HTTPException(403, "Publisher verification is required")
+    until = user.publishing_restricted_until
+    if until and utc(until) > datetime.now(timezone.utc):
+        raise HTTPException(403, f"Publishing is restricted until {utc(until):%Y-%m-%d %H:%M} UTC")
 
 def public_conditions():
     return and_(Audiobook.visibility == AudiobookVisibility.PUBLIC,

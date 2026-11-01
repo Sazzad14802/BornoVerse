@@ -32,7 +32,9 @@ import { StateView } from '../../components/StateView';
 import { TagBadge } from '../../components/TagBadge';
 import { audiobooksApi } from '../../api/audiobooks';
 import { libraryApi, playlistsApi } from '../../api/library';
-import { reportsApi } from '../../api/account';
+import { ChannelProfile, socialApi } from '../../api/social';
+import { FollowButton } from '../../components/FollowButton';
+import { ReportSheet } from '../../components/ReportSheet';
 import { errorMessage } from '../../api/client';
 import { usePlayer } from '../../contexts/PlayerContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -50,12 +52,6 @@ import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
 
-const REPORT_REASONS = [
-  { bn: 'কপিরাইট লঙ্ঘন', en: 'Copyright infringement' },
-  { bn: 'অনুপযুক্ত কনটেন্ট', en: 'Inappropriate content' },
-  { bn: 'অডিওর মান খারাপ', en: 'Poor audio quality' },
-  { bn: 'ভুল তথ্য', en: 'Incorrect information' },
-];
 
 /** The speed after `current`, wrapping around; unknown speeds restart at 1x. */
 function nextSpeed(current: number): number {
@@ -103,7 +99,8 @@ export function PlayerScreen() {
       isMember ? libraryApi.isSaved(bookId).catch(() => false) : Promise.resolve(false),
       user ? offline.list(user.id).catch(() => []) : Promise.resolve([]),
     ]);
-    return { book, saved, downloaded: downloads.some((b) => b.id === bookId) };
+    const channel = book.channel_id && isMember ? await socialApi.channel(book.channel_id).catch(() => null) : null;
+    return { book, saved, downloaded: downloads.some((b) => b.id === bookId), channel };
   }, [bookId]);
 
   const [trackWidth, setTrackWidth] = useState(0);
@@ -112,8 +109,6 @@ export function PlayerScreen() {
   const [openError, setOpenError] = useState<string | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [newPlaylist, setNewPlaylist] = useState('');
-  const [reportReason, setReportReason] = useState(0);
-  const [reportDetails, setReportDetails] = useState('');
   const startedFor = useRef<string | null>(null);
 
   // Offline playback may have no server copy; fall back to the loaded book.
@@ -176,7 +171,8 @@ export function PlayerScreen() {
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
   const shownError = openError ?? (isCurrent ? error : null);
 
-  const update = (patch: { saved?: boolean; downloaded?: boolean }) =>
+  const channel = info.data?.channel ?? null;
+  const update = (patch: { saved?: boolean; downloaded?: boolean; channel?: ChannelProfile | null }) =>
     info.setData((current) => (current ? { ...current, ...patch } : null));
 
   const premiumPrompt = (message: string) =>
@@ -257,15 +253,6 @@ export function PlayerScreen() {
     }, tx('ডাউনলোড ব্যর্থ', 'Download failed'));
   };
 
-  const submitReport = () =>
-    run('report', async () => {
-      const reason = REPORT_REASONS[reportReason];
-      await reportsApi.submit(book.id, `${reason.en}${reportDetails.trim() ? `: ${reportDetails.trim()}` : ''}`);
-      setSheet(null);
-      setReportDetails('');
-      Alert.alert(tx('রিপোর্ট জমা হয়েছে', 'Report submitted'), tx('আমাদের টিম এটি পর্যালোচনা করবে।', 'Our team will review it.'));
-    }, tx('রিপোর্ট', 'Report'));
-
   const actions: PlayerAction[] = [];
   if (isCurrent && chapters.length) {
     actions.push({ id: 'chapters', icon: 'list', label: tx('অধ্যায়', 'Chapters'), onPress: () => setSheet('chapters') });
@@ -325,6 +312,28 @@ export function PlayerScreen() {
           />
           {book.genre ? <TagBadge label={genreLabel(book.genre, isEnglish)} variant="genre" /> : null}
         </View>
+
+        {channel ? (
+          <Pressable
+            style={({ pressed }) => [styles.channelRow, pressed && styles.pressed]}
+            onPress={() => navigation.navigate('ChannelProfile', { channelId: channel.id })}
+            accessibilityRole="button"
+            accessibilityLabel={channel.name}
+          >
+            <View style={styles.channelAvatar}>
+              <Text style={styles.channelInitial}>{channel.name.slice(0, 1).toUpperCase()}</Text>
+            </View>
+            <View style={styles.channelText}>
+              <Text style={styles.channelName} numberOfLines={1}>
+                {channel.name}
+              </Text>
+              <Text style={styles.channelMeta}>
+                {tx(`${channel.followers} জন ফলোয়ার`, `${channel.followers} ${channel.followers === 1 ? 'follower' : 'followers'}`)}
+              </Text>
+            </View>
+            <FollowButton compact channel={channel} onChange={(next) => update({ channel: { ...channel, ...next } })} />
+          </Pressable>
+        ) : null}
 
         {shownError ? (
           <View style={styles.errorBanner}>
@@ -539,32 +548,7 @@ export function PlayerScreen() {
         </View>
       </ModalBottomSheet>
 
-      <ModalBottomSheet visible={sheet === 'report'} onClose={() => setSheet(null)}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>{tx('অডিওবুক রিপোর্ট করুন', 'Report audiobook')}</Text>
-          {REPORT_REASONS.map((reason, index) => (
-            <Pressable
-              key={reason.en}
-              style={[styles.option, reportReason === index && styles.optionActive]}
-              onPress={() => setReportReason(index)}
-            >
-              <Text style={[styles.optionText, reportReason === index && styles.optionTextActive]}>
-                {isEnglish ? reason.en : reason.bn}
-              </Text>
-            </Pressable>
-          ))}
-          <TextInput
-            style={[styles.textInput, styles.multiline]}
-            value={reportDetails}
-            onChangeText={setReportDetails}
-            placeholder={tx('বিস্তারিত (ঐচ্ছিক)', 'Details (optional)')}
-            placeholderTextColor={Colors.textMuted}
-            multiline
-            maxLength={1000}
-          />
-          <AppButton label={tx('রিপোর্ট জমা দিন', 'Submit report')} onPress={submitReport} isLoading={busy === 'report'} />
-        </View>
-      </ModalBottomSheet>
+      <ReportSheet audiobookId={book.id} visible={sheet === 'report'} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
 }
@@ -614,6 +598,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.xs,
     marginTop: Spacing.sm,
+  },
+  channelRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    padding: Spacing.sm,
+    paddingLeft: Spacing.md,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+  },
+  channelAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  channelInitial: {
+    fontSize: FontSizes.base,
+    fontWeight: '700',
+    color: Colors.textOnPrimary,
+  },
+  channelText: {
+    flex: 1,
+  },
+  channelName: {
+    fontSize: FontSizes.sm,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  channelMeta: {
+    fontSize: FontSizes.xs,
+    color: Colors.textSecondary,
   },
   errorBanner: {
     width: '100%',

@@ -15,7 +15,6 @@ import { AppNotification, notificationsApi } from '../../api/notifications';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useResource } from '../../hooks/useResource';
-import { useAppNavigation } from '../../navigation/useAppNavigation';
 import { openNotificationTarget } from '../../navigation/navigationRef';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
@@ -49,7 +48,6 @@ function isToday(iso: string): boolean {
 }
 
 export function NotificationsScreen() {
-  const { navigation } = useAppNavigation();
   const { tx, isEnglish } = useLanguage();
   const { permission, requestPermission, setUnreadCount } = useNotifications();
   const inbox = useResource(() => notificationsApi.list());
@@ -88,7 +86,6 @@ export function NotificationsScreen() {
       <AppHeader
         title={tx('নোটিফিকেশন', 'Notifications')}
         subtitle={unread ? tx(`${unread}টি অপঠিত`, `${unread} unread`) : undefined}
-        onBack={() => navigation.goBack()}
         rightActionText={unread ? tx('সব পঠিত', 'Mark all read') : undefined}
         onRightAction={unread ? markAll : undefined}
       />

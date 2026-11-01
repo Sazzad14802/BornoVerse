@@ -52,9 +52,9 @@ export function AudiobookCard({ audiobook, onPress, onPlayPress, progressPercent
         <Text style={styles.title} numberOfLines={1}>
           {audiobook.title}
         </Text>
-        {audiobook.author ? (
+        {audiobook.author || audiobook.channel_name ? (
           <Text style={styles.author} numberOfLines={1}>
-            {audiobook.author}
+            {[audiobook.author, audiobook.channel_name].filter(Boolean).join(' · ')}
           </Text>
         ) : null}
         <Text

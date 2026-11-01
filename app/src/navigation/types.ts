@@ -23,6 +23,8 @@ export type SharedStackParamList = {
   GenerationStatus: { audiobookId: string };
   PlaylistDetails: { playlistId: string; name: string };
   Notifications: undefined;
+  /** A channel's public page: follow, bell, playlists and audiobooks. */
+  ChannelProfile: { channelId: string };
 };
 
 export type HomeStackParamList = SharedStackParamList & {
@@ -51,6 +53,8 @@ export type ProfileStackParamList = SharedStackParamList & {
   Channel: { channelId: string };
   MyAudiobooks: undefined;
   EditAudiobook: { audiobookId: string };
+  /** Moderation notices, strikes and appeals. */
+  AccountStatus: undefined;
 };
 
 export type MainTabParamList = {

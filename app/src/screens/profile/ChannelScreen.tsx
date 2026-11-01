@@ -1,7 +1,9 @@
 /**
- * ChannelScreen — a verified publisher's channel: everything published lives here.
+ * ChannelScreen — the publisher's channel: everything published lives here,
+ * organised in playlists (shown on the public channel page).
  *
- * Content enters a channel in two ways:
+ * Content enters the channel in two ways, each with an optional
+ * "Add to playlist" (or create a new playlist on the spot):
  * 1. Upload finished MP3 narration (one chapter per file), published right away.
  * 2. Pick one of the user's own generated audiobooks and publish it here.
  */
@@ -13,11 +15,12 @@ import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
 import { AudiobookCard } from '../../components/AudiobookCard';
-import { Field, FormCard, Segmented } from '../../components/Form';
+import { ChoiceCards, Field, FormCard, SelectField } from '../../components/Form';
 import { ListRow } from '../../components/ListRow';
 import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { StateView } from '../../components/StateView';
 import { audiobooksApi } from '../../api/audiobooks';
+import { playlistsApi } from '../../api/library';
 import { publisherApi } from '../../api/account';
 import { errorMessage } from '../../api/client';
 import { PickedFile } from '../../api/upload';
@@ -29,7 +32,7 @@ import { AccessTier, Audiobook } from '../../types/audiobook';
 import { pickAudioFiles } from '../../utils/pickers';
 import { Colors, FontSizes, Spacing } from '../../theme';
 
-type Sheet = 'upload' | 'add' | 'edit' | null;
+type Sheet = 'upload' | 'add' | 'edit' | 'playlist' | null;
 
 export function ChannelScreen() {
   const { navigation } = useAppNavigation();
@@ -37,8 +40,12 @@ export function ChannelScreen() {
   const { tx } = useLanguage();
 
   const data = useResource(async () => {
-    const [channels, mine] = await Promise.all([publisherApi.channels(), audiobooksApi.listMine()]);
-    return { channel: channels.find((c) => c.id === channelId) ?? null, books: mine.items };
+    const [channels, mine, playlists] = await Promise.all([
+      publisherApi.channels(),
+      audiobooksApi.listMine(),
+      playlistsApi.list('channel').catch(() => []),
+    ]);
+    return { channel: channels.find((c) => c.id === channelId) ?? null, books: mine.items, playlists };
   }, [channelId]);
 
   const [sheet, setSheet] = useState<Sheet>(null);
@@ -50,9 +57,52 @@ export function ChannelScreen() {
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  // Optional playlist for the audiobook being published; '' means none.
+  const [playlistId, setPlaylistId] = useState('');
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [returnTo, setReturnTo] = useState<Sheet>(null);
 
   const channel = data.data?.channel;
   const books = data.data?.books ?? [];
+  const playlists = data.data?.playlists ?? [];
+  const playlistOptions = [
+    { value: '', label: tx('কোনো প্লেলিস্টে নয়', 'No playlist') },
+    ...playlists.map((p) => ({ value: p.id, label: p.name, icon: 'list-outline' as const })),
+  ];
+
+  /** Put a just-published audiobook into the chosen playlist (if any). */
+  const addToChosenPlaylist = async (bookId: string) => {
+    if (playlistId) await playlistsApi.addBook(playlistId, bookId);
+  };
+
+  /** Open the new-playlist sheet, then come back to `from` with it selected. */
+  const startNewPlaylist = (from: Sheet) => {
+    setNewPlaylistName('');
+    setReturnTo(from);
+    setSheet('playlist');
+  };
+
+  const createPlaylist = () =>
+    run('playlist', async () => {
+      if (!newPlaylistName.trim()) throw new Error(tx('প্লেলিস্টের নাম দিন।', 'Enter a playlist name.'));
+      const created = await playlistsApi.create(newPlaylistName.trim(), true);
+      await data.reload();
+      setPlaylistId(created.id);
+      setSheet(returnTo);
+    });
+
+  const playlistPicker = (from: Sheet) => (
+    <View style={styles.playlistPicker}>
+      <SelectField
+        label={tx('প্লেলিস্টে যোগ করুন (ঐচ্ছিক)', 'Add to playlist (optional)')}
+        placeholder={tx('কোনো প্লেলিস্টে নয়', 'No playlist')}
+        value={playlistId}
+        onChange={setPlaylistId}
+        options={playlistOptions}
+      />
+      <AppButton label={tx('নতুন প্লেলিস্ট', 'New playlist')} icon="add" variant="text" fullWidth={false} onPress={() => startNewPlaylist(from)} />
+    </View>
+  );
   const channelBooks = useMemo(() => books.filter((b) => b.channel_id === channelId), [books, channelId]);
   // Own finished audiobooks that are not in any channel yet.
   const candidates = useMemo(
@@ -77,6 +127,7 @@ export function ChannelScreen() {
     setTier('free');
     setLanguage('bn');
     setFiles([]);
+    setPlaylistId('');
     setSheet('upload');
   };
 
@@ -106,6 +157,7 @@ export function ChannelScreen() {
       });
       await audiobooksApi.uploadAudio(book.id, files);
       await audiobooksApi.setVisibility(book.id, 'PUBLIC');
+      await addToChosenPlaylist(book.id);
       setSheet(null);
       await data.reload();
       Alert.alert(tx('প্রকাশিত হয়েছে', 'Published'), tx(`«${book.title}» এখন চ্যানেলে আছে।`, `“${book.title}” is now live in this channel.`));
@@ -115,6 +167,7 @@ export function ChannelScreen() {
     run(`add:${book.id}`, async () => {
       await audiobooksApi.update(book.id, { channel_id: channelId });
       await audiobooksApi.setVisibility(book.id, 'PUBLIC');
+      await addToChosenPlaylist(book.id);
       setSheet(null);
       await data.reload();
     });
@@ -206,13 +259,41 @@ export function ChannelScreen() {
               </View>
               <View style={styles.flex}>
                 <AppButton
-                  label={tx('＋ আমার অডিওবুক', '＋ My audiobooks')}
+                  label={tx('আমার অডিওবুক', 'My audiobooks')}
+                  icon="add"
                   variant="secondary"
-                  onPress={() => setSheet('add')}
+                  onPress={() => {
+                    setPlaylistId('');
+                    setSheet('add');
+                  }}
                   disabled={channel.moderated}
                 />
               </View>
             </View>
+
+            <View style={styles.playlistsHeader}>
+              <Text style={styles.sectionTitle}>{tx('প্লেলিস্ট', 'Playlists')}</Text>
+              <AppButton label={tx('নতুন', 'New')} icon="add" variant="text" fullWidth={false} onPress={() => startNewPlaylist(null)} />
+            </View>
+            {playlists.length ? (
+              <FormCard style={styles.candidates}>
+                {playlists.map((p, i) => (
+                  <ListRow
+                    key={p.id}
+                    icon="list-outline"
+                    title={p.name}
+                    subtitle={tx(`${p.count ?? 0}টি অডিওবুক`, `${p.count ?? 0} audiobooks`)}
+                    onPress={() => navigation.navigate('PlaylistDetails', { playlistId: p.id, name: p.name })}
+                    last={i === playlists.length - 1}
+                  />
+                ))}
+              </FormCard>
+            ) : (
+              <Text style={styles.hint}>
+                {tx('প্লেলিস্ট দিয়ে অডিওবুক সাজান; শ্রোতারা চ্যানেল পেজে দেখবে।', 'Group audiobooks into playlists; listeners see them on your channel page.')}
+              </Text>
+            )}
+            <Text style={styles.sectionTitle}>{tx('অডিওবুক', 'Audiobooks')}</Text>
           </View>
         }
         ListEmptyComponent={
@@ -270,22 +351,22 @@ export function ChannelScreen() {
           <Text style={styles.sheetTitle}>{tx('MP3 আপলোড করে প্রকাশ', 'Upload MP3s & publish')}</Text>
           <Field label={tx('শিরোনাম', 'Title')} required value={title} onChangeText={setTitle} maxLength={255} />
           <Field label={tx('লেখক', 'Author')} value={author} onChangeText={setAuthor} maxLength={255} />
-          <Segmented
+          <ChoiceCards
             label={tx('ভাষা', 'Language')}
             value={language}
             onChange={setLanguage}
             options={[
-              { value: 'bn', label: 'বাংলা' },
-              { value: 'en', label: 'English' },
+              { value: 'bn', label: 'বাংলা', icon: 'language-outline' },
+              { value: 'en', label: 'English', icon: 'language-outline' },
             ]}
           />
-          <Segmented
+          <ChoiceCards
             label={tx('অ্যাক্সেস', 'Access')}
             value={tier}
             onChange={setTier}
             options={[
-              { value: 'free', label: tx('ফ্রি', 'Free') },
-              { value: 'premium', label: tx('প্রিমিয়াম', 'Premium') },
+              { value: 'free', label: tx('ফ্রি', 'Free'), icon: 'lock-open-outline', description: tx('সবাই শুনতে পারবে', 'Everyone can listen') },
+              { value: 'premium', label: tx('প্রিমিয়াম', 'Premium'), icon: 'diamond-outline', description: tx('শুধু প্রিমিয়াম শ্রোতা', 'Premium listeners only') },
             ]}
             hint={tier === 'premium' ? tx('প্রিমিয়াম শ্রোতাদের যোগ্য শোনা থেকে আয় হয়।', 'Earns revenue from eligible premium listens.') : undefined}
           />
@@ -300,6 +381,7 @@ export function ChannelScreen() {
               {files.map((f, i) => `${i + 1}. ${f.name}`).join('\n')}
             </Text>
           ) : null}
+          {playlistPicker('upload')}
           <AppButton label={tx('আপলোড ও প্রকাশ', 'Upload & publish')} onPress={upload} isLoading={busy === 'upload'} disabled={!files.length} />
         </View>
       </ModalBottomSheet>
@@ -307,6 +389,7 @@ export function ChannelScreen() {
       <ModalBottomSheet visible={sheet === 'add'} onClose={() => setSheet(null)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>{tx('আমার অডিওবুক থেকে প্রকাশ', 'Publish one of my audiobooks')}</Text>
+          {candidates.length ? playlistPicker('add') : null}
           {candidates.length ? (
             <FormCard style={styles.candidates}>
               {candidates.map((book, i) => (
@@ -328,6 +411,22 @@ export function ChannelScreen() {
               )}
             </Text>
           )}
+        </View>
+      </ModalBottomSheet>
+
+      <ModalBottomSheet visible={sheet === 'playlist'} onClose={() => setSheet(returnTo)}>
+        <View style={styles.sheet}>
+          <Text style={styles.sheetTitle}>{tx('নতুন প্লেলিস্ট', 'New playlist')}</Text>
+          <Field
+            label={tx('নাম', 'Name')}
+            required
+            value={newPlaylistName}
+            onChangeText={setNewPlaylistName}
+            placeholder={tx('যেমন: রবীন্দ্র রচনা', 'e.g. Tagore collection')}
+            maxLength={150}
+            autoFocus
+          />
+          <AppButton label={tx('তৈরি করুন', 'Create playlist')} onPress={createPlaylist} isLoading={busy === 'playlist'} />
         </View>
       </ModalBottomSheet>
 
@@ -401,5 +500,19 @@ const styles = StyleSheet.create({
   },
   candidates: {
     gap: Spacing.xs,
+  },
+  playlistsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: FontSizes.base,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  playlistPicker: {
+    gap: 2,
+    alignItems: 'flex-start',
   },
 });

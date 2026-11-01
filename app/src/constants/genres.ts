@@ -7,19 +7,27 @@ export interface Genre {
   key: string;
   bn: string;
   en: string;
+  /** Ionicons name shown on genre tiles. */
+  icon: string;
 }
 
 export const GENRES: Genre[] = [
-  { key: 'novel', bn: 'উপন্যাস', en: 'Novel' },
-  { key: 'story', bn: 'গল্প', en: 'Short stories' },
-  { key: 'poetry', bn: 'কবিতা', en: 'Poetry' },
-  { key: 'children', bn: 'শিশুতোষ', en: 'Children' },
-  { key: 'mystery', bn: 'রহস্য', en: 'Mystery' },
-  { key: 'history', bn: 'ইতিহাস', en: 'History' },
-  { key: 'religion', bn: 'ধর্ম', en: 'Religion' },
-  { key: 'self-help', bn: 'আত্মোন্নয়ন', en: 'Self-help' },
-  { key: 'science', bn: 'বিজ্ঞান', en: 'Science' },
-  { key: 'education', bn: 'শিক্ষা', en: 'Education' },
+  { key: 'novel', bn: 'উপন্যাস', en: 'Novel', icon: 'book-outline' },
+  { key: 'story', bn: 'গল্প', en: 'Short stories', icon: 'reader-outline' },
+  { key: 'poetry', bn: 'কবিতা', en: 'Poetry', icon: 'create-outline' },
+  { key: 'sci-fi', bn: 'বিজ্ঞান কল্পকাহিনি', en: 'Science fiction', icon: 'planet-outline' },
+  { key: 'thriller', bn: 'থ্রিলার', en: 'Thriller', icon: 'flash-outline' },
+  { key: 'mystery', bn: 'রহস্য', en: 'Mystery', icon: 'search-outline' },
+  { key: 'romance', bn: 'প্রেম', en: 'Romance', icon: 'heart-outline' },
+  { key: 'children', bn: 'শিশুতোষ', en: 'Children', icon: 'happy-outline' },
+  { key: 'history', bn: 'ইতিহাস', en: 'History', icon: 'time-outline' },
+  { key: 'biography', bn: 'জীবনী', en: 'Biography', icon: 'person-outline' },
+  { key: 'humor', bn: 'রম্য', en: 'Humour', icon: 'sunny-outline' },
+  { key: 'drama', bn: 'নাটক', en: 'Drama', icon: 'film-outline' },
+  { key: 'religion', bn: 'ধর্ম', en: 'Religion', icon: 'moon-outline' },
+  { key: 'self-help', bn: 'আত্মোন্নয়ন', en: 'Self-help', icon: 'trending-up-outline' },
+  { key: 'science', bn: 'বিজ্ঞান', en: 'Science', icon: 'flask-outline' },
+  { key: 'education', bn: 'শিক্ষা', en: 'Education', icon: 'school-outline' },
 ];
 
 export function genreLabel(key: string | null | undefined, english: boolean): string {

@@ -12,6 +12,8 @@ from app.models.library import LibraryItem
 from app.models.playback import PlaybackProgress
 from app.models.platform import *
 from app.models.notification import Notification, PushToken
+from app.models.social import UserInterest, ChannelFollow
+from app.models.moderation import ModerationAction, ContentAppeal, ModerationEvidence, UserStrike, UserRestriction
 
 __all__ = [
     "Base",
@@ -25,4 +27,6 @@ __all__ = [
     "PlaybackProgress",
     "Notification",
     "PushToken",
+    "UserInterest",
+    "ChannelFollow",
 ]

@@ -15,6 +15,8 @@ from app.models.user import User
 from app.schemas.audiobook import AudiobookCreate, AudiobookUpdate
 from app.services.policy import public_conditions, publishing
 from app.models.platform import Channel
+from app.services.notification_service import deliver
+from app.services.social_service import announce
 
 async def validate_channel(db, user, channel_id):
     if channel_id:
@@ -287,7 +289,10 @@ async def update_visibility(
             raise HTTPException(409, "Only completed, unrestricted audiobooks can be published")
     audiobook.visibility = new_visibility
     audiobook.publication_status = "published" if new_visibility == AudiobookVisibility.PUBLIC else "draft"
+    await db.flush()
+    followers = await announce(db, audiobook)
     await db.commit()
+    await deliver(db, followers)
     await db.refresh(audiobook)
     return audiobook
 
