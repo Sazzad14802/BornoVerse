@@ -34,7 +34,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
   other: ['অন্যান্য', 'Other'],
 };
 
-const REASONS: { key: AppealReason; bn: string; en: string }[] = [
+export const APPEAL_REASONS: { key: AppealReason; bn: string; en: string }[] = [
   { key: 'own_rights', bn: 'আমি এর স্বত্বাধিকারী', en: 'I own the rights' },
   { key: 'have_permission', bn: 'আমার অনুমতি/লাইসেন্স আছে', en: 'I have permission or a licence' },
   { key: 'original_work', bn: 'এটি আমার মৌলিক কাজ', en: 'It is my original work' },
@@ -230,7 +230,7 @@ export function AccountStatusScreen() {
           <SheetScrollView maxHeight={460}>
             <View style={styles.form}>
               <Text style={styles.label}>{tx('আপিলের কারণ', 'Reason')}</Text>
-              {REASONS.map((r) => {
+              {APPEAL_REASONS.map((r) => {
                 const selected = reason === r.key;
                 return (
                   <Pressable

@@ -1,6 +1,9 @@
 /**
- * SubscriptionScreen — Premium plans, purchase, auto-renew status and payment history.
- * Prices come from the server; the client only chooses a plan.
+ * SubscriptionScreen — Premium plans.
+ * - No Premium: every plan, with the benefits.
+ * - Premium: the current plan and only longer plans as upgrades; on the
+ *   longest plan nothing can be bought. Payment history has its own screen.
+ * Prices come from the server, which also refuses the same or a shorter plan.
  */
 
 import React, { useState } from 'react';
@@ -36,17 +39,25 @@ export function SubscriptionScreen() {
   const premium = isPremium(user);
 
   const data = useResource(async () => {
-    const [plans, payments] = await Promise.all([subscriptionApi.plans(), paymentsApi.list()]);
-    return { plans, payments };
-  });
+    const [plans, current] = await Promise.all([
+      subscriptionApi.plans(),
+      subscriptionApi.current().catch(() => null),
+    ]);
+    return { plans, current };
+  }, [user?.premium_until]);
   const [selected, setSelected] = useState<string | null>(null);
   const [buying, setBuying] = useState(false);
 
-  const plans = data.data?.plans ?? [];
+  const allPlans = data.data?.plans ?? [];
+  const current = premium ? data.data?.current ?? null : null;
+  const currentPlan = current?.plan ?? null;
+  // While Premium is active only longer plans are offered.
+  const plans = current && currentPlan ? allPlans.filter((p) => current.upgrade_plan_ids.includes(p.id)) : allPlans;
+  const isHighest = !!currentPlan && plans.length === 0;
   const chosen = plans.find((p) => p.id === selected) ?? plans[0];
 
   const monthly = (plan: Plan) => Number(plan.price) / plan.months;
-  const base = plans.length ? Math.max(...plans.map(monthly)) : 0;
+  const base = allPlans.length ? Math.max(...allPlans.map(monthly)) : 0;
 
   const buy = async () => {
     if (!chosen) return;
@@ -81,21 +92,24 @@ export function SubscriptionScreen() {
       ],
     );
 
+  const months = (n: number) => tx(`${n} মাস`, `${n} month${n > 1 ? 's' : ''}`);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <AppHeader title={tx('প্রিমিয়াম', 'Premium')} onBack={() => navigation.goBack()} />
+      <AppHeader title={currentPlan ? tx('আপনার প্ল্যান', 'Your plan') : tx('প্রিমিয়াম', 'Premium')} onBack={() => navigation.goBack()} />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={data.isRefreshing} onRefresh={data.refresh} tintColor={Colors.primary} />}
       >
         {premium ? (
           <View style={styles.activeCard}>
-            <Text style={styles.activeTitle}>{tx('প্রিমিয়াম সক্রিয়', 'Premium is active')}</Text>
-            <Text style={styles.activeText}>
-              {tx(`মেয়াদ: ${formatDate(user?.premium_until, false)}`, `Valid until ${formatDate(user?.premium_until, true)}`)}
+            <Text style={styles.activeTitle}>
+              {currentPlan
+                ? tx(`বর্তমান প্ল্যান: ${currentPlan.name}`, `Current plan: ${currentPlan.name}`)
+                : tx('প্রিমিয়াম সক্রিয়', 'Premium is active')}
             </Text>
             <Text style={styles.activeText}>
-              {tx('আরেকটি প্ল্যান কিনলে মেয়াদ বাড়বে।', 'Buying another plan extends your expiry date.')}
+              {tx(`মেয়াদ: ${formatDate(user?.premium_until, false)}`, `Valid until ${formatDate(user?.premium_until, true)}`)}
             </Text>
           </View>
         ) : (
@@ -113,8 +127,17 @@ export function SubscriptionScreen() {
           <StateView kind="loading" />
         ) : data.error && !data.data ? (
           <StateView kind="error" message={data.error} actionLabel={tx('আবার চেষ্টা', 'Retry')} onAction={data.reload} />
+        ) : isHighest ? (
+          <View style={styles.check}>
+            <Ionicons name="ribbon-outline" size={40} color={Colors.tintPurpleText} />
+            <Text style={styles.checkTitle}>{tx('আপনি সর্বোচ্চ প্ল্যানে আছেন', 'You are on our highest plan')}</Text>
+            <Text style={styles.activeText}>
+              {tx('সব প্রিমিয়াম সুবিধা চালু আছে। উপভোগ করুন!', 'Every Premium benefit is on. Enjoy listening!')}
+            </Text>
+          </View>
         ) : (
           <>
+            {currentPlan ? <Text style={styles.sectionTitle}>{tx('প্ল্যান আপগ্রেড করুন', 'Upgrade your plan')}</Text> : null}
             {plans.map((plan) => {
               const active = chosen?.id === plan.id;
               const saving = base ? Math.round((1 - monthly(plan) / base) * 100) : 0;
@@ -130,7 +153,7 @@ export function SubscriptionScreen() {
                   <View style={styles.planText}>
                     <Text style={styles.planName}>{plan.name}</Text>
                     <Text style={styles.planMeta}>
-                      {tx(`${plan.months} মাস · মাসে ${formatMoney(monthly(plan).toFixed(0))}`, `${plan.months} month${plan.months > 1 ? 's' : ''} · ${formatMoney(monthly(plan).toFixed(0))}/mo`)}
+                      {months(plan.months)} · {tx(`মাসে ${formatMoney(monthly(plan).toFixed(0))}`, `${formatMoney(monthly(plan).toFixed(0))}/mo`)}
                     </Text>
                   </View>
                   <View style={styles.planPrice}>
@@ -142,42 +165,28 @@ export function SubscriptionScreen() {
             })}
 
             <AppButton
-              label={chosen ? tx(`${formatMoney(chosen.price)} পরিশোধ করুন`, `Pay ${formatMoney(chosen.price)}`) : tx('প্ল্যান বেছে নিন', 'Choose a plan')}
+              label={
+                chosen
+                  ? currentPlan
+                    ? tx(`${formatMoney(chosen.price)} দিয়ে আপগ্রেড করুন`, `Upgrade for ${formatMoney(chosen.price)}`)
+                    : tx(`${formatMoney(chosen.price)} পরিশোধ করুন`, `Pay ${formatMoney(chosen.price)}`)
+                  : tx('প্ল্যান বেছে নিন', 'Choose a plan')
+              }
               onPress={buy}
               isLoading={buying}
               disabled={!chosen}
             />
             <Text style={styles.fine}>
-              {tx('bKash, Nagad, কার্ড ও ব্যাংক — SSLCommerz-এর মাধ্যমে।', 'bKash, Nagad, cards and banks — via SSLCommerz.')}
+              {currentPlan
+                ? tx('নতুন প্ল্যানের মেয়াদ বর্তমান মেয়াদের সাথে যোগ হবে।', 'The new plan is added on top of your current expiry.')
+                : tx('bKash, Nagad, কার্ড ও ব্যাংক — SSLCommerz-এর মাধ্যমে।', 'bKash, Nagad, cards and banks — via SSLCommerz.')}
             </Text>
-
-            {premium && !user?.subscription_cancelled ? (
-              <AppButton label={tx('নবায়ন রিমাইন্ডার বন্ধ করুন', 'Turn off renewal')} variant="secondary" onPress={cancel} />
-            ) : null}
-
-            {data.data?.payments.length ? (
-              <View style={styles.history}>
-                <Text style={styles.historyTitle}>{tx('পেমেন্ট ইতিহাস', 'Payment history')}</Text>
-                {data.data.payments.map((p) => (
-                  <View key={p.id} style={styles.historyRow}>
-                    <View style={styles.historyIcon}>
-                      <Ionicons name="receipt-outline" size={18} color={Colors.primary} />
-                    </View>
-                    <View style={styles.planText}>
-                      <Text style={styles.historyName}>
-                        {p.kind === 'subscription'
-                          ? tx(`প্রিমিয়াম · ${p.months} মাস`, `Premium · ${p.months} month${p.months > 1 ? 's' : ''}`)
-                          : tx('প্রকাশক নিবন্ধন ফি', 'Publisher registration fee')}
-                      </Text>
-                      <Text style={styles.planMeta}>{formatDate(p.updated_at, isEnglish)}</Text>
-                    </View>
-                    <Text style={styles.historyAmount}>{formatMoney(p.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
           </>
         )}
+
+        {premium && !user?.subscription_cancelled ? (
+          <AppButton label={tx('নবায়ন রিমাইন্ডার বন্ধ করুন', 'Turn off renewal')} variant="secondary" onPress={cancel} />
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -283,40 +292,19 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: 'center',
   },
-  history: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
-    padding: Spacing.md,
+  check: {
+    alignItems: 'center',
     gap: Spacing.sm,
+    paddingVertical: Spacing.lg,
   },
-  historyTitle: {
-    fontSize: FontSizes.base,
+  checkTitle: {
+    fontSize: FontSizes.md,
     fontWeight: '700',
     color: Colors.textPrimary,
+    textAlign: 'center',
   },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  historyName: {
-    fontSize: FontSizes.sm,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  historyIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: Radius.sm + 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primarySurface,
-  },
-  historyAmount: {
-    fontSize: FontSizes.sm,
+  sectionTitle: {
+    fontSize: FontSizes.base,
     fontWeight: '700',
     color: Colors.textPrimary,
   },

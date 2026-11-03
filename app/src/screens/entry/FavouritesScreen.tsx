@@ -27,7 +27,7 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-export function FavouritesScreen({ onDone }: { onDone: () => void }) {
+export function FavouritesScreen({ onDone, editing = false }: { onDone: () => void; editing?: boolean }) {
   const { tx, isEnglish } = useLanguage();
   const [genres, setGenres] = useState<string[]>([]);
   const [channels, setChannels] = useState<string[]>([]);
@@ -37,7 +37,17 @@ export function FavouritesScreen({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     socialApi.channels().then(setPublishers).catch(() => setPublishers([]));
-  }, []);
+    // Editing later starts from what was saved.
+    if (editing) {
+      socialApi
+        .favourites()
+        .then((f) => {
+          setGenres(f.genres);
+          setChannels(f.channels);
+        })
+        .catch(() => {});
+    }
+  }, [editing]);
 
   const count = genres.length + channels.length;
   const toggle = (list: string[], set: (v: string[]) => void, value: string) =>

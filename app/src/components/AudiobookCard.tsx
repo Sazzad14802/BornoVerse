@@ -26,9 +26,11 @@ interface AudiobookCardProps {
   meta?: string;
   /** Custom control on the right (e.g. a Remove button); replaces the play button / chevron. */
   trailing?: React.ReactNode;
+  /** Press and hold (e.g. an owner's options menu). */
+  onLongPress?: () => void;
 }
 
-export function AudiobookCard({ audiobook, onPress, onPlayPress, progressPercent, meta, trailing }: AudiobookCardProps) {
+export function AudiobookCard({ audiobook, onPress, onPlayPress, progressPercent, meta, trailing, onLongPress }: AudiobookCardProps) {
   const isPremium = audiobook.access_tier === 'premium';
   const duration = audiobook.duration_seconds ? ` · ${formatDuration(audiobook.duration_seconds)}` : '';
   const progressText = progressPercent ? ` · ${Math.round(progressPercent)}%` : '';
@@ -39,8 +41,11 @@ export function AudiobookCard({ audiobook, onPress, onPlayPress, progressPercent
     <Pressable
       style={({ pressed }) => [styles.rowContainer, pressed && styles.rowPressed]}
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`${audiobook.title} by ${audiobook.author ?? 'Unknown'}`}
+      accessibilityHint={onLongPress ? 'Press and hold for options' : undefined}
     >
       {/* Thumbnail */}
       <View style={styles.coverWrapper}>

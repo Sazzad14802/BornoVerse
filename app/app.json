@@ -74,7 +74,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "owner": "aristonix",
     "scheme": "bornoverse",

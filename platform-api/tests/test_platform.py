@@ -206,3 +206,29 @@ async def test_eligible_views_deduplicated_and_withdrawal_audit(client,db_sessio
         assert (await client.post(f'/api/v1/admin/withdrawals/{id}/decision',headers=admin,json={"action":action,"reason":"Test simulated settlement"})).status_code==200
     assert (await client.post(f'/api/v1/admin/withdrawals/{id}/decision',headers=admin,json={"action":"complete","reason":"Duplicate completion"})).status_code==409
     assert (await client.get('/api/v1/publisher/dashboard',headers=owner_tokens['headers'])).json()['available_balance']=='25.00'
+
+async def test_premium_can_only_upgrade_and_gets_invoices(client,db_session,mock_payments):
+    _,headers=await account(client)
+    monthly=Plan(name="Monthly",months=1,price=Decimal('150'));yearly=Plan(name="Yearly",months=12,price=Decimal('1200'))
+    db_session.add_all([monthly,yearly]);await db_session.commit()
+    current=(await client.get('/api/v1/subscriptions/current',headers=headers)).json()
+    assert current['plan'] is None and len(current['upgrade_plan_ids'])==2 and current['is_highest'] is False
+
+    async def buy(plan,key):
+        return await client.post('/api/v1/payments',headers=headers,json={"kind":"subscription","plan_id":str(plan.id),"idempotency_key":"order-key-"+key})
+    first=await buy(monthly,"m1");assert first.status_code==200,first.text;order=first.json()
+    await client.post(f"/api/v1/payments/{order['id']}/mock-confirm",headers=headers,json={"status":"success"})
+    current=(await client.get('/api/v1/subscriptions/current',headers=headers)).json()
+    assert current['plan']['name']=="Monthly" and current['upgrade_plan_ids']==[str(yearly.id)]
+    # The same plan again is refused while Premium is active; a longer one is an upgrade.
+    assert (await buy(monthly,"m2")).status_code==409
+    upgrade=(await buy(yearly,"y1")).json()
+    await client.post(f"/api/v1/payments/{upgrade['id']}/mock-confirm",headers=headers,json={"status":"success"})
+    current=(await client.get('/api/v1/subscriptions/current',headers=headers)).json()
+    assert current['plan']['name']=="Yearly" and current['is_highest'] is True
+    assert (await buy(yearly,"y2")).status_code==409
+
+    invoice=(await client.get(f"/api/v1/payments/{upgrade['id']}/invoice",headers=headers)).json()
+    assert invoice['amount']=="1200.00" and invoice['invoice_number'].startswith("BV-") and "Yearly" in invoice['item']
+    _,other=await account(client,email="other@example.com",username="otheruser")
+    assert (await client.get(f"/api/v1/payments/{upgrade['id']}/invoice",headers=other)).status_code==404

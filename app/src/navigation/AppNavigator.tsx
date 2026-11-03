@@ -18,30 +18,46 @@ import { navigationRef } from './navigationRef';
 type Gate = 'checking' | 'required' | 'done';
 
 /** Whether the signed-in listener still has to pick favourites. */
-function useFavouritesGate(userId: string | undefined, isMember: boolean): [Gate, () => void] {
+function useFavouritesGate(userId: string | undefined, isMember: boolean, isNewAccount: boolean): [Gate, () => void] {
   const [gate, setGate] = useState<Gate>('checking');
   useEffect(() => {
     if (!userId || !isMember) {
       setGate('done');
       return;
     }
+    // An account just created on this device always picks favourites first.
+    if (isNewAccount) {
+      setGate('required');
+      return;
+    }
     let active = true;
     setGate('checking');
-    socialApi
-      .favourites()
-      .then((f) => active && setGate(f.required ? 'required' : 'done'))
-      // Offline or an older server: never block the app on this.
-      .catch(() => active && setGate('done'));
+    const ask = (retry: boolean): Promise<void> =>
+      socialApi
+        .favourites()
+        .then((f) => {
+          if (active) setGate(f.required ? 'required' : 'done');
+        })
+        .catch(() => {
+          // A sleeping server (cold start) gets one more try; never block the app on this.
+          if (retry && active) return new Promise<void>((r) => setTimeout(r, 2500)).then(() => ask(false));
+          if (active) setGate('done');
+        });
+    ask(true);
     return () => {
       active = false;
     };
-  }, [userId, isMember]);
+  }, [userId, isMember, isNewAccount]);
   return [gate, () => setGate('done')];
 }
 
 export function AppNavigator() {
-  const { isLoading, isAuthenticated, user } = useAuth();
-  const [gate, finish] = useFavouritesGate(isAuthenticated ? user?.id : undefined, user?.account_type === 'user');
+  const { isLoading, isAuthenticated, user, isNewAccount, finishOnboarding } = useAuth();
+  const [gate, close] = useFavouritesGate(isAuthenticated ? user?.id : undefined, user?.account_type === 'user', isNewAccount);
+  const finish = () => {
+    finishOnboarding();
+    close();
+  };
 
   if (isLoading || (isAuthenticated && gate === 'checking')) {
     return <Loading fullScreen message="" />;

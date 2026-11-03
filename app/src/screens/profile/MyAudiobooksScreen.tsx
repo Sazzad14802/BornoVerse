@@ -1,14 +1,16 @@
 /**
  * MyAudiobooksScreen — audiobooks the user owns, with their generation state
- * and owner actions: open, follow generation, publish/unpublish, edit, delete.
+ * Tap opens it (or its generation progress); press and hold opens a menu with
+ * publish/unpublish, edit and delete.
  */
 
-import React from 'react';
-import { Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AudiobookCard } from '../../components/AudiobookCard';
-import { AppButton } from '../../components/AppButton';
 import { StateView } from '../../components/StateView';
 import { audiobooksApi } from '../../api/audiobooks';
 import { errorMessage } from '../../api/client';
@@ -19,7 +21,7 @@ import { useResource } from '../../hooks/useResource';
 import { useAppNavigation } from '../../navigation/useAppNavigation';
 import { isActivePublisher } from '../../types/auth';
 import { Audiobook } from '../../types/audiobook';
-import { Colors, FontSizes, Spacing } from '../../theme';
+import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
 export function MyAudiobooksScreen() {
   const { navigation, goToTab } = useAppNavigation();
@@ -28,6 +30,7 @@ export function MyAudiobooksScreen() {
   const { tx } = useLanguage();
   const canPublish = isActivePublisher(user);
   const books = useResource(() => audiobooksApi.listMine().then((r) => r.items));
+  const [menuFor, setMenuFor] = useState<Audiobook | null>(null);
 
   const replace = (book: Audiobook) =>
     books.setData((current) => (current ?? []).map((b) => (b.id === book.id ? book : b)));
@@ -105,9 +108,15 @@ export function MyAudiobooksScreen() {
             />
           )
         }
+        ListHeaderComponent={
+          (books.data?.length ?? 0) > 0 ? (
+            <Text style={styles.hint}>{tx('অপশনের জন্য অডিওবুক চেপে ধরে রাখুন', 'Press and hold an audiobook for options')}</Text>
+          ) : null
+        }
         renderItem={({ item }) => (
           <View style={styles.item}>
             <AudiobookCard
+              onLongPress={() => setMenuFor(item)}
               audiobook={item}
               meta={meta(item)}
               onPress={() =>
@@ -119,23 +128,6 @@ export function MyAudiobooksScreen() {
               }
               onPlayPress={() => play(item)}
             />
-            <View style={styles.actions}>
-              {canPublish && item.channel_id && item.status === 'COMPLETED' && !item.moderated ? (
-                <AppButton
-                  label={item.visibility === 'PUBLIC' ? tx('প্রাইভেট করুন', 'Make private') : tx('প্রকাশ করুন', 'Publish')}
-                  variant="outline"
-                  fullWidth={false}
-                  onPress={() => toggleVisibility(item)}
-                />
-              ) : null}
-              <AppButton
-                label={tx('সম্পাদনা', 'Edit')}
-                variant="outline"
-                fullWidth={false}
-                onPress={() => navigation.navigate('EditAudiobook', { audiobookId: item.id })}
-              />
-              <AppButton label={tx('মুছুন', 'Delete')} variant="outline" fullWidth={false} onPress={() => remove(item)} />
-            </View>
           </View>
         )}
         ListFooterComponent={
@@ -146,7 +138,68 @@ export function MyAudiobooksScreen() {
           ) : null
         }
       />
+
+      <ModalBottomSheet visible={!!menuFor} onClose={() => setMenuFor(null)}>
+        {menuFor ? (
+          <View style={styles.menu}>
+            <Text style={styles.menuTitle} numberOfLines={2}>
+              {menuFor.title}
+            </Text>
+            <Text style={styles.menuMeta}>{meta(menuFor)}</Text>
+            {canPublish && menuFor.channel_id && menuFor.status === 'COMPLETED' && !menuFor.moderated ? (
+              <MenuRow
+                icon={menuFor.visibility === 'PUBLIC' ? 'eye-off-outline' : 'globe-outline'}
+                label={menuFor.visibility === 'PUBLIC' ? tx('প্রাইভেট করুন', 'Make private') : tx('প্রকাশ করুন', 'Publish')}
+                onPress={() => {
+                  const book = menuFor;
+                  setMenuFor(null);
+                  toggleVisibility(book);
+                }}
+              />
+            ) : null}
+            <MenuRow
+              icon="create-outline"
+              label={tx('সম্পাদনা', 'Edit')}
+              onPress={() => {
+                const id = menuFor.id;
+                setMenuFor(null);
+                navigation.navigate('EditAudiobook', { audiobookId: id });
+              }}
+            />
+            <MenuRow
+              icon="trash-outline"
+              label={tx('মুছুন', 'Delete')}
+              destructive
+              onPress={() => {
+                const book = menuFor;
+                setMenuFor(null);
+                remove(book);
+              }}
+            />
+          </View>
+        ) : null}
+      </ModalBottomSheet>
     </SafeAreaView>
+  );
+}
+
+function MenuRow({
+  icon,
+  label,
+  onPress,
+  destructive,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  onPress: () => void;
+  destructive?: boolean;
+}) {
+  const color = destructive ? Colors.error : Colors.textPrimary;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]} accessibilityRole="button">
+      <Ionicons name={icon} size={22} color={color} />
+      <Text style={[styles.menuText, { color }]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -166,11 +219,39 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.surfaceBorder,
     paddingBottom: Spacing.sm,
   },
-  actions: {
+  hint: {
+    fontSize: FontSizes.xs,
+    color: Colors.textMuted,
+    marginBottom: Spacing.xs,
+  },
+  menu: {
+    gap: 2,
+    paddingTop: Spacing.xs,
+  },
+  menuTitle: {
+    fontSize: FontSizes.lg,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  menuMeta: {
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.sm,
+  },
+  menuRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
+    alignItems: 'center',
+    gap: Spacing.md,
+    minHeight: 52,
+    paddingHorizontal: Spacing.xs,
+    borderRadius: Radius.md,
+  },
+  menuText: {
+    fontSize: FontSizes.base,
+    fontWeight: '500',
+  },
+  pressed: {
+    backgroundColor: Colors.surfaceElevated,
   },
   note: {
     textAlign: 'center',

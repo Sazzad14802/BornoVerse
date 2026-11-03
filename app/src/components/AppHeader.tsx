@@ -19,6 +19,8 @@ interface AppHeaderProps {
   showLogo?: boolean;
   rightActionText?: string;
   onRightAction?: () => void;
+  /** Show the text action dimmed and inactive. */
+  rightActionDisabled?: boolean;
   /** Icon button (an Ionicons name) shown on the right; takes precedence over the options menu. */
   rightIcon?: React.ComponentProps<typeof Ionicons>['name'];
   rightIconLabel?: string;
@@ -36,6 +38,7 @@ export function AppHeader({
   showLogo = false,
   rightActionText,
   onRightAction,
+  rightActionDisabled = false,
   rightIcon,
   rightIconLabel,
   onRightIconPress,
@@ -112,11 +115,13 @@ export function AppHeader({
         ) : rightActionText && onRightAction ? (
           <Pressable
             onPress={onRightAction}
+            disabled={rightActionDisabled}
             style={({ pressed }) => [styles.headerTextBtn, pressed && styles.iconButtonPressed]}
             hitSlop={8}
             accessibilityRole="button"
+            accessibilityState={{ disabled: rightActionDisabled }}
           >
-            <Text style={styles.headerTextBtnLabel}>{rightActionText}</Text>
+            <Text style={[styles.headerTextBtnLabel, rightActionDisabled && styles.headerTextBtnDisabled]}>{rightActionText}</Text>
           </Pressable>
         ) : onOptionsPress ? (
           <Pressable
@@ -229,7 +234,10 @@ const styles = StyleSheet.create({
   headerTextBtnLabel: {
     fontSize: FontSizes.xs + 1,
     fontWeight: '700',
-    color: Colors.textSecondary,
+    color: Colors.primary,
     letterSpacing: 0.2,
+  },
+  headerTextBtnDisabled: {
+    color: Colors.textMuted,
   },
 });

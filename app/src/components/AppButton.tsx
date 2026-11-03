@@ -3,7 +3,7 @@
  *
  * Variants: primary (filled brand green), secondary / outline (white, bordered),
  * google (white, bordered, official "G" mark), compact (smaller primary) and
- * text (borderless link). An optional leading Ionicon; loading shows a spinner.
+ * text (borderless link) and danger (filled red, for destructive or urgent actions). An optional leading Ionicon; loading shows a spinner.
  */
 
 import React from 'react';
@@ -11,7 +11,7 @@ import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, FontSizes, Radius, Spacing } from '../theme';
 
-export type AppButtonVariant = 'primary' | 'secondary' | 'google' | 'outline' | 'compact' | 'text';
+export type AppButtonVariant = 'primary' | 'secondary' | 'google' | 'outline' | 'compact' | 'text' | 'danger';
 
 interface AppButtonProps {
   label: string;
@@ -32,7 +32,7 @@ export function AppButton({
   fullWidth = true,
   icon,
 }: AppButtonProps) {
-  const filled = variant === 'primary' || variant === 'compact';
+  const filled = variant === 'primary' || variant === 'compact' || variant === 'danger';
   const bordered = variant === 'secondary' || variant === 'outline' || variant === 'google';
   const foreground = filled ? Colors.textOnPrimary : variant === 'text' ? Colors.primary : Colors.textPrimary;
 
@@ -47,6 +47,8 @@ export function AppButton({
         variant === 'text' && styles.text,
         filled && styles.filled,
         filled && pressed && styles.filledPressed,
+        variant === 'danger' && styles.danger,
+        variant === 'danger' && pressed && styles.dangerPressed,
         bordered && styles.bordered,
         bordered && pressed && styles.borderedPressed,
         variant === 'text' && pressed && styles.textPressed,
@@ -87,6 +89,12 @@ const styles = StyleSheet.create({
   },
   fullWidth: {
     width: '100%',
+  },
+  danger: {
+    backgroundColor: Colors.error,
+  },
+  dangerPressed: {
+    opacity: 0.85,
   },
   compact: {
     height: 40,

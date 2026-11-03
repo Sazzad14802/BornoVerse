@@ -107,7 +107,7 @@ def notice_body(title: str, violation: str, lines: list[str], appeal: bool) -> s
     if lines:
         body.append("নেওয়া ব্যবস্থা:\n" + "\n".join(f"- {line}" for line in lines))
     if appeal:
-        body.append(f"সিদ্ধান্তটি ভুল মনে হলে {APPEAL_DAYS} দিনের মধ্যে আপিল করুন (প্রোফাইল > অ্যাকাউন্ট স্ট্যাটাস)।")
+        body.append(f"সিদ্ধান্তটি ভুল মনে হলে {APPEAL_DAYS} দিনের মধ্যে আপিল করুন (প্রকাশক স্টুডিও > আপিল করুন)।")
     return "\n\n".join(body)
 
 
@@ -151,6 +151,30 @@ async def take_actions(db: AsyncSession, admin: User, report: Report, *, violati
         other.resolution = f"Handled in case {report.id}"
         set_status(db, admin, other, "resolved", f"Merged into case {report.id}")
     return notice
+
+
+async def open_admin_case(db: AsyncSession, admin: User, book: Audiobook, reason: str) -> Optional[Notification]:
+    """A moderator hides content directly: open a case so the owner gets a notice and can appeal."""
+    label = "Moderator action"
+    report = Report(user_id=admin.id, audiobook_id=book.id, owner_id=book.owner_id, category="other",
+                    details=reason, reason=f"{label}: {reason}" if reason else label, status="under_review",
+                    source="admin")
+    db.add(report)
+    await db.flush()
+    audit(db, admin, "moderation.report.opened_by_admin", report.id, new_status="under_review",
+          audiobook_id=str(book.id))
+    return await take_actions(db, admin, report, violation="other", notify_owner=True, hide=True,
+                              restrict_days=None, flag_note="", message=reason, note=reason)
+
+
+async def close_cases_for_restore(db: AsyncSession, admin: User, book: Audiobook, note: str) -> None:
+    """A moderator restores content: reverse and close the cases that hid it."""
+    reports = (await db.scalars(select(Report).where(
+        Report.audiobook_id == book.id, Report.status.in_(("action_taken", "appealed"))))).all()
+    for report in reports:
+        await reverse_case(db, admin, report)
+        report.resolution = note or "Content restored by a moderator"
+        set_status(db, admin, report, "resolved", note, outcome="restored")
 
 
 async def active_strikes(db: AsyncSession, user_id: uuid.UUID) -> int:

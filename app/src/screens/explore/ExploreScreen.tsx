@@ -1,6 +1,6 @@
 /**
- * ExploreScreen — browse the public catalog with the shared filter bar
- * (genre, language, access, sort). Results page in on demand.
+ * ExploreScreen — browse the public catalog. The filter icon next to the search
+ * bar opens genre, language, access and sort. Results page in on demand.
  */
 
 import React, { useState } from 'react';
@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { AudiobookCard } from '../../components/AudiobookCard';
-import { CatalogFilters, DEFAULT_FILTERS, filterQuery, isFiltered } from '../../components/CatalogFilters';
+import { DEFAULT_FILTERS, FilterButton, FilterSummary, filterQuery, isFiltered } from '../../components/CatalogFilters';
 import { ChannelTile } from '../../components/ChannelRow';
 import { socialApi } from '../../api/social';
 import { StateView } from '../../components/StateView';
@@ -72,14 +72,19 @@ export function ExploreScreen() {
 
   const header = (
     <View style={styles.headerBlock}>
-      <Pressable
-        style={({ pressed }) => [styles.searchBar, pressed && styles.pressed]}
-        onPress={() => navigation.navigate('SearchResults', {})}
-        accessibilityRole="search"
-      >
-        <Ionicons name="search" size={20} color={Colors.textMuted} />
-        <Text style={styles.searchPlaceholder}>{t('searchPlaceholder')}</Text>
-      </Pressable>
+      <View style={styles.searchRow}>
+        <Pressable
+          style={({ pressed }) => [styles.searchBar, pressed && styles.pressed]}
+          onPress={() => navigation.navigate('SearchResults', {})}
+          accessibilityRole="search"
+        >
+          <Ionicons name="search" size={20} color={Colors.textMuted} />
+          <Text style={styles.searchPlaceholder} numberOfLines={1}>
+            {t('searchPlaceholder')}
+          </Text>
+        </Pressable>
+        <FilterButton value={filterValues} onChange={setFilterValues} />
+      </View>
 
       {channels.data?.length ? (
         <View style={styles.channels}>
@@ -97,7 +102,7 @@ export function ExploreScreen() {
       ) : null}
 
       <Text style={styles.sectionTitle}>{tx('অডিওবুক', 'Audiobooks')}</Text>
-      <CatalogFilters value={filterValues} onChange={setFilterValues} />
+      <FilterSummary value={filterValues} onChange={setFilterValues} />
       {first.data ? (
         <Text style={styles.count}>{tx(`${first.data.total}টি অডিওবুক`, `${first.data.total} audiobooks`)}</Text>
       ) : null}
@@ -167,7 +172,13 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     marginBottom: Spacing.sm,
   },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   searchBar: {
+    flex: 1,
     height: 48,
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,

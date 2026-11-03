@@ -1,6 +1,6 @@
 /**
  * SearchResultsScreen — live search over title and author (debounced), narrowed
- * by the shared filter bar. Before typing it shows recent searches; a search is
+ * by the filter icon next to the search bar. Before typing it shows recent searches; a search is
  * remembered once the listener submits it or opens one of its results.
  */
 
@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { AudiobookCard } from '../../components/AudiobookCard';
-import { CatalogFilters, DEFAULT_FILTERS, filterQuery, isFiltered } from '../../components/CatalogFilters';
+import { DEFAULT_FILTERS, FilterButton, FilterSummary, filterQuery, isFiltered } from '../../components/CatalogFilters';
 import { ChannelRow } from '../../components/ChannelRow';
 import { ChannelSummary, socialApi } from '../../api/social';
 import { StateView } from '../../components/StateView';
@@ -168,11 +168,16 @@ export function SearchResultsScreen() {
             </Pressable>
           ) : null}
         </View>
+        <FilterButton value={filters} onChange={setFilters} />
       </View>
 
-      <View style={styles.filters}>
-        <CatalogFilters value={filters} onChange={setFilters} />
-      </View>
+      {isFiltered(filters) ? (
+        <View style={styles.filters}>
+          <FilterSummary value={filters} onChange={setFilters} />
+        </View>
+      ) : (
+        <View style={styles.gap} />
+      )}
 
       <FlatList
         data={active ? results : []}
@@ -269,6 +274,9 @@ const styles = StyleSheet.create({
   filters: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.md,
+  },
+  gap: {
+    height: Spacing.md,
   },
   list: {
     paddingHorizontal: Spacing.md,

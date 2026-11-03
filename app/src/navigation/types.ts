@@ -14,10 +14,17 @@ export type AuthStackParamList = {
   NotificationsPrompt: undefined;
   Login: undefined;
   ForgotPassword: undefined;
+  /** Sign-up step 2: the emailed code. */
+  VerifyEmail: { signup: import('../types/auth').RegisterRequest; resendAfter?: number; devCode?: string };
+  Terms: undefined;
 };
 
 /** Screens registered in every tab stack. */
 export type SharedStackParamList = {
+  /** Terms of Service and Privacy Policy. */
+  Terms: undefined;
+  /** Change favourite genres and channels. */
+  EditFavourites: undefined;
   /** Opening a book plays it; without an id the player shows what is loaded. */
   Player: { audiobookId?: string } | undefined;
   GenerationStatus: { audiobookId: string };
@@ -55,6 +62,11 @@ export type ProfileStackParamList = SharedStackParamList & {
   EditAudiobook: { audiobookId: string };
   /** Moderation notices, strikes and appeals. */
   AccountStatus: undefined;
+  /** Running and past appeals. */
+  Appeals: undefined;
+  /** Completed payments; each opens its details and invoice. */
+  PaymentHistory: undefined;
+  PaymentDetails: { orderId: string };
 };
 
 export type MainTabParamList = {

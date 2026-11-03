@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { AuthStackParamList } from '../../navigation/types';
 import { AppButton } from '../../components/AppButton';
 import { IconInput } from '../../components/Form';
+import { PasswordRules, passwordValid } from '../../components/PasswordRules';
 import { authApi } from '../../api/auth';
 import { ApiError, errorMessage } from '../../api/client';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -26,7 +27,7 @@ type Step = 'email' | 'code' | 'password' | 'done';
 const CODE_LENGTH = 6;
 
 /** Six boxes over one hidden input, so paste and the SMS/email autofill work. */
-function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function CodeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const input = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
   return (
@@ -85,6 +86,8 @@ export function ForgotPasswordScreen() {
     } catch (e) {
       if (e instanceof ApiError && e.isNetworkError) {
         setError(tx('সার্ভারে সংযোগ করা যায়নি। আবার চেষ্টা করুন।', 'Could not reach the server. Try again.'));
+      } else if (e instanceof ApiError && e.status === 503) {
+        setError(tx('ইমেইল পাঠানোর সেবা এখনো চালু হয়নি। পরে চেষ্টা করুন বা অ্যাডমিনকে জানান।', 'Email sending is not set up on the server yet. Try later or contact the admin.'));
       } else {
         setError(errorMessage(e));
       }
@@ -119,8 +122,7 @@ export function ForgotPasswordScreen() {
 
   const reset = () =>
     run(async () => {
-      if (password.length < 6) throw new Error(tx('পাসওয়ার্ড অন্তত ৬ অক্ষরের হতে হবে।', 'Password must be at least 6 characters.'));
-      if (password !== confirm) throw new Error(tx('দুটি পাসওয়ার্ড মেলেনি।', 'The passwords do not match.'));
+      if (!passwordValid(password, confirm)) throw new Error(tx('পাসওয়ার্ডের সব শর্ত পূরণ করুন।', 'Meet every password requirement.'));
       await authApi.resetPassword(token, password);
       setStep('done');
     });
@@ -219,6 +221,7 @@ export function ForgotPasswordScreen() {
                   returnKeyType="done"
                   onSubmitEditing={reset}
                 />
+                <PasswordRules password={password} confirm={confirm} />
               </>
             ) : null}
 

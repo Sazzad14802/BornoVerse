@@ -21,11 +21,46 @@ export const profileApi = {
   update(fullName: string): Promise<User> {
     return apiClient.patch<User>('/users/me', { full_name: fullName });
   },
+
+  /** Permanently deletes the account and everything in it. */
+  deleteAccount(): Promise<{ deleted: boolean }> {
+    return apiClient.post('/users/me/delete', { confirm: 'DELETE' });
+  },
 };
+
+/** The active plan and which plans count as an upgrade. */
+export interface CurrentSubscription {
+  plan: { id: string | null; name: string; months: number } | null;
+  premium_until: string | null;
+  upgrade_plan_ids: string[];
+  is_highest: boolean;
+}
+
+/** Details of a completed payment, for the receipt and the invoice PDF. */
+export interface Invoice {
+  invoice_number: string;
+  order_id: string;
+  issued_at: string;
+  status: string;
+  customer: { name: string; email: string; serial: number | null };
+  item: string;
+  item_bn: string;
+  kind: 'subscription' | 'publisher_registration';
+  months: number;
+  amount: string;
+  currency: string;
+  provider: string;
+  transaction_id: string;
+  bank_transaction_id: string | null;
+}
 
 export const subscriptionApi = {
   plans(): Promise<Plan[]> {
     return apiClient.get<Plan[]>('/subscriptions/plans', false);
+  },
+
+  current(): Promise<CurrentSubscription> {
+    return apiClient.get<CurrentSubscription>('/subscriptions/current');
   },
 
   cancel(): Promise<{ message: string; premium_until: string | null }> {
@@ -45,6 +80,10 @@ export const paymentsApi = {
       plan_id: planId ?? null,
       idempotency_key: idempotencyKey,
     });
+  },
+
+  invoice(orderId: string): Promise<Invoice> {
+    return apiClient.get<Invoice>(`/payments/${orderId}/invoice`);
   },
 
   get(orderId: string): Promise<PaymentOrder> {
@@ -83,6 +122,11 @@ export const publisherApi = {
 
   createChannel(name: string, description: string): Promise<Channel> {
     return apiClient.post<Channel>('/publisher/channels', { name, description });
+  },
+
+  /** Deletes the channel; its audiobooks stay in My audiobooks as private. */
+  deleteChannel(id: string): Promise<{ deleted: boolean; audiobooks_kept: number }> {
+    return apiClient.delete(`/publisher/channels/${id}`);
   },
 
   updateChannel(id: string, name: string, description: string): Promise<Channel> {

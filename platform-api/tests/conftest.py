@@ -7,6 +7,7 @@ import os
 os.environ["DEBUG"] = "false"
 # Tests never reach external services, whatever the developer's local .env says.
 os.environ["PUSH_NOTIFICATIONS_ENABLED"] = "false"
+os.environ["REQUIRE_EMAIL_VERIFICATION"] = "false"
 os.environ["SSLCOMMERZ_STORE_ID"] = ""
 os.environ["SSLCOMMERZ_STORE_PASSWORD"] = ""
 os.environ["SUPABASE_URL"] = ""

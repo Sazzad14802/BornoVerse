@@ -10,6 +10,8 @@ import { SplashScreen } from '../screens/entry/SplashScreen';
 import { LanguageSelectScreen } from '../screens/entry/LanguageSelectScreen';
 import { NotificationsPromptScreen } from '../screens/entry/NotificationsPromptScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
+import { VerifyEmailScreen } from '../screens/auth/VerifyEmailScreen';
+import { TermsScreen } from '../screens/auth/TermsScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import { useNotifications } from '../contexts/NotificationsContext';
 import { onboardingStorage } from '../storage/onboardingStorage';
@@ -73,6 +75,8 @@ export function AuthNavigator() {
 
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
+      <Stack.Screen name="Terms" component={TermsScreen} />
     </Stack.Navigator>
   );
 }

@@ -77,7 +77,7 @@ export function LanguageSelectScreen({ onBack, onContinue }: LanguageSelectScree
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <AppHeader
         title={t('langSelectTitle')}
         subtitle={t('langSelectSub')}

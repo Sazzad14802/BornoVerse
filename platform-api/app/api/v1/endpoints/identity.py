@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 import jwt
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select
 from app.api.deps import DatabaseDep, CurrentUserDep
 from app.core.config import settings
@@ -41,7 +41,13 @@ class VerifyRequest(BaseModel):
 
 class ResetRequest(BaseModel):
     token: str = Field(min_length=20, max_length=200)
-    password: str = Field(min_length=6, max_length=72)
+    password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def password_rules(cls, value):
+        from app.schemas.auth import check_password
+        return check_password(value)
 
 CODE_MINUTES = 10
 CODE_ATTEMPTS = 5
@@ -186,7 +192,7 @@ async def supabase_login(data: SupabaseRequest, db: DatabaseDep):
         metadata = identity.get("user_metadata") or {}
         base = "".join(ch for ch in email.split("@")[0].lower() if ch.isalnum() or ch == "_")[:30] or "user"
         user = await register_user(db, RegisterRequest(
-            email=email, username=f"{base}_{secrets.token_hex(3)}", password=secrets.token_urlsafe(32)[:60],
+            email=email, username=f"{base}_{secrets.token_hex(3)}", password=secrets.token_urlsafe(32)[:58] + "a1",
             full_name=(metadata.get("full_name") or metadata.get("name") or "")[:150]))
         audit(db, user, "account.google_signup", user.id)
         await db.commit()
@@ -204,7 +210,7 @@ async def google(data: GoogleRequest, db: DatabaseDep):
     if not user:
         from app.services.auth_service import register_user
         user = await register_user(db, RegisterRequest(email=claims["email"],
-            username="google_" + secrets.token_hex(8), password=secrets.token_urlsafe(32),
+            username="google_" + secrets.token_hex(8), password=secrets.token_urlsafe(32) + "a1",
             full_name=claims.get("name", "")))
     if user.suspended:
         raise HTTPException(403, "Account suspended")

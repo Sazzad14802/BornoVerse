@@ -14,7 +14,7 @@ from app.models.platform import FinancialAdjustment
 from app.models.moderation import ContentAppeal
 from app.schemas.user import UserRead
 from app.services.policy import audit, configuration, month_now
-from app.services import billing
+from app.services import billing, moderation_service
 from app.services.notification_service import deliver, notify
 
 router = APIRouter()
@@ -137,6 +137,15 @@ async def moderate(kind: str, id: UUID, data: Decision, db: DatabaseDep, admin: 
     row = await db.get(model, id)
     if not row:
         raise HTTPException(404, "Content not found")
+    if kind == "audiobooks" and data.action == "restrict" and not row.moderated:
+        # Hiding an audiobook opens a case: notice with the reason and a 7-day appeal.
+        notice = await moderation_service.open_admin_case(db, admin, row, (data.reason or "").strip())
+        audit(db, admin, f"{kind}.{data.action}", id, reason=data.reason)
+        await db.commit()
+        await deliver(db, [notice])
+        return record(row)
+    if kind == "audiobooks" and data.action == "restore":
+        await moderation_service.close_cases_for_restore(db, admin, row, (data.reason or "").strip())
     row.moderated = data.action == "restrict"
     audit(db, admin, f"{kind}.{data.action}", id, reason=data.reason)
     owner_id = row.owner_id

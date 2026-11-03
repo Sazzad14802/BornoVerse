@@ -83,6 +83,17 @@ def notify(
     return row
 
 
+PUSH_BODY_CHARS = 160
+
+
+def push_body(body: str) -> str:
+    """Phones show a few lines: send the first paragraph; the full text stays in the inbox."""
+    first = body.split("\n\n", 1)[0].strip()
+    if len(first) > PUSH_BODY_CHARS:
+        first = first[:PUSH_BODY_CHARS].rsplit(" ", 1)[0] + "…"
+    return first + ("\nবিস্তারিত দেখতে ট্যাপ করুন।" if first != body.strip() else "")
+
+
 async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notification]]) -> None:
     """Push already-committed notifications to every device of their recipients."""
     rows = [n for n in notifications if n is not None]
@@ -99,7 +110,7 @@ async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notificatio
         {
             "to": token,
             "title": n.title,
-            "body": n.body,
+            "body": push_body(n.body),
             "sound": "default",
             "channelId": "default",
             "priority": "high",

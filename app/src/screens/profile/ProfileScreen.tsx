@@ -15,7 +15,8 @@ import { ListRow } from '../../components/ListRow';
 import { ChipGroup } from '../../components/Chip';
 import { Field, FormCard } from '../../components/Form';
 import { ModalBottomSheet } from '../../components/ModalBottomSheet';
-import { profileApi } from '../../api/account';
+import { profileApi, subscriptionApi } from '../../api/account';
+import { useResource } from '../../hooks/useResource';
 import { errorMessage } from '../../api/client';
 import { offline } from '../../storage/offline';
 import { useAuth } from '../../contexts/AuthContext';
@@ -43,6 +44,8 @@ export function ProfileScreen() {
   if (!user) return null;
   const isPublisher = isActivePublisher(user);
   const premium = isPremium(user);
+  // On the highest plan there is nothing to upgrade to.
+  const plan = useResource(() => (premium ? subscriptionApi.current().catch(() => null) : Promise.resolve(null)), [premium, user?.premium_until]);
   const displayName = user.full_name || user.username;
 
   const publisherStatus: Record<string, string> = {
@@ -79,6 +82,25 @@ export function ProfileScreen() {
     }
     const granted = await requestPermission();
     if (!granted) Linking.openSettings();
+  };
+
+  const [deleting, setDeleting] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [removing, setRemoving] = useState(false);
+
+  const deleteAccount = async () => {
+    setRemoving(true);
+    try {
+      await profileApi.deleteAccount();
+      setDeleting(false);
+      await stop();
+      await offline.clear(user.id).catch(() => {});
+      await logout();
+    } catch (error) {
+      Alert.alert(tx('মুছা যায়নি', 'Could not delete'), errorMessage(error));
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const signOut = () =>
@@ -122,18 +144,26 @@ export function ProfileScreen() {
         </View>
 
         <View style={[styles.highlightCard, premium && styles.premiumCard]}>
-            <Text style={styles.highlightTitle}>{premium ? tx('প্রিমিয়াম সক্রিয়', 'Premium is active') : tx('প্রিমিয়ামে আপগ্রেড করুন', 'Upgrade to Premium')}</Text>
+            <Text style={styles.highlightTitle}>
+              {premium
+                ? plan.data?.plan
+                  ? tx(`প্রিমিয়াম · ${plan.data.plan.name}`, `Premium · ${plan.data.plan.name}`)
+                  : tx('প্রিমিয়াম সক্রিয়', 'Premium is active')
+                : tx('প্রিমিয়ামে আপগ্রেড করুন', 'Upgrade to Premium')}
+            </Text>
             <Text style={styles.highlightText}>
               {premium
                 ? tx(`মেয়াদ: ${formatDate(user.premium_until, false)}`, `Valid until ${formatDate(user.premium_until, true)}`)
                 : tx('প্রিমিয়াম অডিওবুক, অফলাইন ডাউনলোড ও বেশি অডিও তৈরির সুযোগ।', 'Premium audiobooks, offline downloads and more generations.')}
             </Text>
-            <AppButton
-              label={premium ? tx('পরিচালনা', 'Manage') : tx('প্ল্যান দেখুন', 'See plans')}
-              onPress={() => navigation.navigate('Subscription')}
-              variant="compact"
-              fullWidth={false}
-            />
+            {plan.data?.is_highest ? null : (
+              <AppButton
+                label={premium ? tx('প্ল্যান আপগ্রেড করুন', 'Upgrade your plan') : tx('প্ল্যান দেখুন', 'See plans')}
+                onPress={() => navigation.navigate('Subscription')}
+                variant="compact"
+                fullWidth={false}
+              />
+            )}
           </View>
 
         <FormCard style={styles.menu}>
@@ -157,12 +187,12 @@ export function ProfileScreen() {
             onPress={() => navigation.navigate('Notifications')}
           />
           <ListRow
-            icon="shield-checkmark-outline"
-            title={tx('অ্যাকাউন্ট স্ট্যাটাস', 'Account status')}
-            subtitle={tx('মডারেশন নোটিশ ও আপিল', 'Moderation notices and appeals')}
-            onPress={() => navigation.navigate('AccountStatus')}
+            icon="heart-outline"
+            title={tx('পছন্দের বিষয়', 'Favourites')}
+            subtitle={tx('ধরন ও প্রকাশক বদলান', 'Change genres and publishers')}
+            onPress={() => navigation.navigate('EditFavourites')}
           />
-          <ListRow icon="receipt-outline" title={tx('পেমেন্ট ইতিহাস', 'Payment history')} onPress={() => navigation.navigate('Subscription')} />
+          <ListRow icon="receipt-outline" title={tx('পেমেন্ট ইতিহাস', 'Payment history')} onPress={() => navigation.navigate('PaymentHistory')} />
           <ListRow icon="create-outline" title={tx('নাম পরিবর্তন', 'Edit name')} value={displayName} onPress={() => setEditingName(true)} last />
         </FormCard>
 
@@ -191,13 +221,55 @@ export function ProfileScreen() {
         </FormCard>
 
         <FormCard style={styles.menu}>
-          <ListRow icon="log-out-outline" title={tx('সাইন আউট', 'Sign out')} onPress={signOut} destructive last />
+          <ListRow
+            icon="document-text-outline"
+            title={tx('শর্তাবলি ও গোপনীয়তা নীতি', 'Terms & Privacy Policy')}
+            onPress={() => navigation.navigate('Terms')}
+          />
+          <ListRow icon="log-out-outline" title={tx('সাইন আউট', 'Sign out')} onPress={signOut} destructive />
+          <ListRow
+            icon="trash-outline"
+            title={tx('অ্যাকাউন্ট মুছুন', 'Delete account')}
+            subtitle={tx('সব তথ্য স্থায়ীভাবে মুছে যাবে', 'Everything is removed permanently')}
+            onPress={() => {
+              setDeleteText('');
+              setDeleting(true);
+            }}
+            destructive
+            last
+          />
         </FormCard>
 
         <Text style={styles.version}>
           BornoVerse {Constants.expoConfig?.version ?? ''} · {isEnglish ? 'Member since' : 'সদস্য'} {formatDate(user.created_at, isEnglish)}
         </Text>
       </ScrollView>
+
+      <ModalBottomSheet visible={deleting} onClose={() => setDeleting(false)}>
+        <View style={styles.sheet}>
+          <Text style={styles.deleteTitle}>{tx('অ্যাকাউন্ট স্থায়ীভাবে মুছবেন?', 'Delete your account permanently?')}</Text>
+          <Text style={styles.deleteText}>
+            {tx(
+              'আপনার অডিওবুক ও অডিও, চ্যানেল, প্লেলিস্ট, লাইব্রেরি, শোনার ইতিহাস, ফলো, পেমেন্টের রেকর্ড ও নোটিফিকেশন সব মুছে যাবে। প্রিমিয়ামের বাকি মেয়াদ ফেরত হবে না। এটি ফেরানো যাবে না।',
+              'Your audiobooks and audio, channel, playlists, library, listening history, follows, payment records and notifications are all deleted. Remaining Premium time is not refunded. This cannot be undone.',
+            )}
+          </Text>
+          <Field
+            label={tx('নিশ্চিত করতে DELETE লিখুন', 'Type DELETE to confirm')}
+            value={deleteText}
+            onChangeText={setDeleteText}
+            autoCapitalize="characters"
+            maxLength={10}
+          />
+          <AppButton
+            label={tx('অ্যাকাউন্ট মুছুন', 'Delete account')}
+            variant="danger"
+            onPress={deleteAccount}
+            isLoading={removing}
+            disabled={deleteText.trim() !== 'DELETE'}
+          />
+        </View>
+      </ModalBottomSheet>
 
       <ModalBottomSheet visible={editingName} onClose={() => setEditingName(false)}>
         <View style={styles.sheet}>
@@ -210,6 +282,16 @@ export function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  deleteTitle: {
+    fontSize: FontSizes.lg,
+    fontWeight: '700',
+    color: Colors.error,
+  },
+  deleteText: {
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background,

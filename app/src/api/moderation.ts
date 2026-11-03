@@ -44,6 +44,23 @@ export interface ModerationStanding {
   cases: ModerationCase[];
 }
 
+/** One of the user's appeals, for the Appeals screen. */
+export interface AppealRecord {
+  id: string;
+  report_id: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  reason: AppealReason;
+  explanation: string;
+  decision_note: string;
+  created_at: string;
+  decided_at: string | null;
+  files: number;
+  violation: ReportCategory | null;
+  violation_label: string | null;
+  case_status: string | null;
+  audiobook: { id: string; title: string } | null;
+}
+
 export const moderationApi = {
   report(audiobookId: string, category: ReportCategory, details: string): Promise<{ id: string }> {
     return apiClient.post('/reports', { audiobook_id: audiobookId, category, details });
@@ -55,6 +72,10 @@ export const moderationApi = {
 
   standing(): Promise<ModerationStanding> {
     return apiClient.get<ModerationStanding>('/me/moderation');
+  },
+
+  appeals(): Promise<AppealRecord[]> {
+    return apiClient.get<AppealRecord[]>('/me/appeals');
   },
 
   appeal(reportId: string, reason: AppealReason, explanation: string): Promise<{ id: string }> {

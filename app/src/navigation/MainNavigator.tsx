@@ -35,6 +35,11 @@ import { ChannelScreen } from '../screens/profile/ChannelScreen';
 import { MyAudiobooksScreen } from '../screens/profile/MyAudiobooksScreen';
 import { EditAudiobookScreen } from '../screens/profile/EditAudiobookScreen';
 import { AccountStatusScreen } from '../screens/profile/AccountStatusScreen';
+import { AppealsScreen } from '../screens/profile/AppealsScreen';
+import { TermsScreen } from '../screens/auth/TermsScreen';
+import { FavouritesScreen } from '../screens/entry/FavouritesScreen';
+import { PaymentHistoryScreen } from '../screens/profile/PaymentHistoryScreen';
+import { PaymentDetailsScreen } from '../screens/profile/PaymentDetailsScreen';
 import { PlayerScreen } from '../screens/audiobook/PlayerScreen';
 import { ChannelProfileScreen } from '../screens/channel/ChannelProfileScreen';
 
@@ -57,8 +62,15 @@ function withSharedScreens(Stack: any) {
       <Stack.Screen name="PlaylistDetails" component={PlaylistDetailsScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="ChannelProfile" component={ChannelProfileScreen} />
+      <Stack.Screen name="Terms" component={TermsScreen} />
+      <Stack.Screen name="EditFavourites" component={EditFavouritesRoute} />
     </>
   );
+}
+
+/** Favourites opened from Profile: starts from the saved picks, returns when saved. */
+function EditFavouritesRoute({ navigation }: { navigation: { goBack: () => void } }) {
+  return <FavouritesScreen editing onDone={() => navigation.goBack()} />;
 }
 
 const HomeStack = createNativeStackNavigator<HomeStackParamList>();
@@ -115,6 +127,9 @@ function ProfileStackNavigator() {
       <ProfileStack.Screen name="MyAudiobooks" component={MyAudiobooksScreen} />
       <ProfileStack.Screen name="EditAudiobook" component={EditAudiobookScreen} />
       <ProfileStack.Screen name="AccountStatus" component={AccountStatusScreen} />
+      <ProfileStack.Screen name="Appeals" component={AppealsScreen} />
+      <ProfileStack.Screen name="PaymentHistory" component={PaymentHistoryScreen} />
+      <ProfileStack.Screen name="PaymentDetails" component={PaymentDetailsScreen} />
       {withSharedScreens(ProfileStack)}
     </ProfileStack.Navigator>
   );
@@ -124,7 +139,9 @@ export function MainNavigator() {
   return (
     <Tab.Navigator
       tabBar={(props) => <CustomBottomTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      // Leaving a tab returns it to its first screen: tapping Profile again opens
+      // Profile, not the sub-page last visited there.
+      screenOptions={{ headerShown: false, popToTopOnBlur: true }}
     >
       <Tab.Screen name="HomeTab" component={HomeStackNavigator} />
       <Tab.Screen name="ExploreTab" component={ExploreStackNavigator} />

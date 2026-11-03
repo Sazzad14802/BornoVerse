@@ -30,7 +30,7 @@ export function NotificationsPromptScreen({
   const { isEnglish } = useLanguage();
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <AppHeader
         title={isEnglish ? 'Notifications' : 'নোটিফিকেশন'}
         subtitle={isEnglish ? 'Alerts & updates' : 'আপডেট ও নোটিফিকেশন'}

@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AudiobookCard } from '../../components/AudiobookCard';
-import { ChipGroup } from '../../components/Chip';
+import { TabStrip } from '../../components/TabStrip';
 import { StateView } from '../../components/StateView';
 import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { AppButton } from '../../components/AppButton';
@@ -100,8 +100,8 @@ export function LibraryScreen() {
 
   const empty = {
     saved: {
-      title: tx('কিছু সেভ করা নেই', 'Nothing saved yet'),
-      message: tx('অডিওবুকের পাতায় “সেভ” চাপলে এখানে দেখা যাবে।', 'Tap “Save” on an audiobook to keep it here.'),
+      title: tx('কোনো ফেভারিট নেই', 'No favourites yet'),
+      message: tx('প্লেয়ারে হার্ট চাপলে অডিওবুকটি এখানে দেখা যাবে।', 'Tap the heart in the player to keep a book here.'),
       action: tx('অডিওবুক খুঁজুন', 'Browse audiobooks'),
       onAction: () => goToTab('ExploreTab', { screen: 'Explore' }),
     },
@@ -143,16 +143,15 @@ export function LibraryScreen() {
       />
 
       <View style={styles.tabs}>
-        <ChipGroup
-          scrollable
+        <TabStrip<Tab>
           value={tab}
           onChange={setTab}
-          options={[
-            { value: 'saved', label: `${tx('সেভ করা', 'Saved')}${data ? ` · ${data.saved.length}` : ''}` },
-            { value: 'following', label: `${tx('ফলো করছেন', 'Following')}${data ? ` · ${data.following.length}` : ''}` },
-            { value: 'playlists', label: `${tx('প্লেলিস্ট', 'Playlists')}${data ? ` · ${data.playlists.length}` : ''}` },
-            { value: 'downloads', label: `${tx('ডাউনলোড', 'Downloads')}${data ? ` · ${data.downloads.length}` : ''}` },
-            { value: 'mine', label: `${tx('আমার তৈরি', 'My creations')}${data ? ` · ${data.mine.length}` : ''}` },
+          items={[
+            { value: 'saved', icon: 'heart-outline', label: tx('ফেভারিট', 'Favourites'), count: data?.saved.length },
+            { value: 'following', icon: 'people-outline', label: tx('ফলো', 'Following'), count: data?.following.length },
+            { value: 'playlists', icon: 'albums-outline', label: tx('প্লেলিস্ট', 'Playlists'), count: data?.playlists.length },
+            { value: 'downloads', icon: 'download-outline', label: tx('ডাউনলোড', 'Downloads'), count: data?.downloads.length },
+            { value: 'mine', icon: 'mic-outline', label: tx('আমার তৈরি', 'Created'), count: data?.mine.length },
           ]}
         />
       </View>

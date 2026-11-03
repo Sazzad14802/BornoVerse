@@ -6,7 +6,9 @@
  * Without a param (mini player) it shows whatever the PlayerContext has loaded.
  *
  * Artwork, access/genre tags, tap-to-seek progress, ±10s, previous/next chapter,
- * tap-to-cycle speed, then an icon row: Chapters (bottom sheet) · Save · Playlist · Offline · Report.
+ * tap-to-cycle speed. Title, the channel name (opens the channel) with a Follow pill,
+ * and a heart that adds the book to Favourites. Icon row: Chapters · Playlist ·
+ * Offline · More (view channel, report).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -14,6 +16,7 @@ import {
   ActivityIndicator,
   Alert,
   LayoutChangeEvent,
+  useWindowDimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,7 +62,7 @@ function nextSpeed(current: number): number {
   return index === -1 ? 1 : SPEEDS[(index + 1) % SPEEDS.length];
 }
 
-type Sheet = 'chapters' | 'playlist' | 'report' | null;
+type Sheet = 'chapters' | 'playlist' | 'report' | 'more' | null;
 
 interface PlayerAction {
   id: string;
@@ -89,6 +92,9 @@ export function PlayerScreen() {
   } = player;
 
   const isMember = user?.account_type === 'user';
+  // Artwork fits the screen: narrower on short phones, capped on tablets.
+  const window = useWindowDimensions();
+  const artworkSize = Math.round(Math.min(window.width * 0.86, window.height * 0.4, 440));
   const bookId = requestedId ?? audiobook?.id;
 
   // Server copy of the book (tags, access) plus this listener's saved/downloaded state.
@@ -172,6 +178,12 @@ export function PlayerScreen() {
   const shownError = openError ?? (isCurrent ? error : null);
 
   const channel = info.data?.channel ?? null;
+  const channelId = channel?.id ?? book.channel_id ?? null;
+  const channelName = channel?.name ?? book.channel_name ?? null;
+  const openChannel = () => {
+    setSheet(null);
+    if (channelId) navigation.navigate('ChannelProfile', { channelId });
+  };
   const update = (patch: { saved?: boolean; downloaded?: boolean; channel?: ChannelProfile | null }) =>
     info.setData((current) => (current ? { ...current, ...patch } : null));
 
@@ -258,13 +270,6 @@ export function PlayerScreen() {
     actions.push({ id: 'chapters', icon: 'list', label: tx('অধ্যায়', 'Chapters'), onPress: () => setSheet('chapters') });
   }
   if (isMember) {
-    actions.push({
-      id: 'save',
-      icon: saved ? 'bookmark' : 'bookmark-outline',
-      label: saved ? tx('সংরক্ষিত', 'Saved') : tx('সেভ', 'Save'),
-      active: saved,
-      onPress: toggleSave,
-    });
     actions.push({ id: 'playlist', icon: 'albums-outline', label: tx('প্লেলিস্ট', 'Playlist'), onPress: openPlaylists });
     if (!isOffline && book.status === 'COMPLETED' && !isLocked) {
       actions.push({
@@ -276,13 +281,24 @@ export function PlayerScreen() {
         onPress: toggleOffline,
       });
     }
-    if (!isOwner) actions.push({ id: 'report', icon: 'flag-outline', label: tx('রিপোর্ট', 'Report'), onPress: () => setSheet('report') });
+  }
+  // Less frequent options (channel, report) live behind the three dots.
+  const moreOptions: { id: string; icon: PlayerAction['icon']; label: string; onPress: () => void; destructive?: boolean }[] = [];
+  if (channelId) {
+    moreOptions.push({ id: 'channel', icon: 'person-circle-outline', label: tx('চ্যানেল দেখুন', 'View channel'), onPress: openChannel });
+  }
+  if (isMember && !isOwner) {
+    moreOptions.push({ id: 'report', icon: 'flag-outline', label: tx('রিপোর্ট করুন', 'Report'), onPress: () => setSheet('report'), destructive: true });
+  }
+  if (moreOptions.length) {
+    actions.push({ id: 'more', icon: 'ellipsis-vertical', label: tx('আরও', 'More'), onPress: () => setSheet('more') });
   }
 
   const remaining = chapters.slice(currentChapterIndex + 1).reduce((sum, c) => sum + (c.duration_seconds || 0), 0);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+    // No bottom edge: the tab bar below already keeps clear of the system navigation.
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <AppHeader
         title={t('playerNowPlaying')}
         subtitle={isOffline && isCurrent ? tx('অফলাইন', 'Offline') : book.author ?? undefined}
@@ -292,17 +308,65 @@ export function PlayerScreen() {
       />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.artworkContainer}>
+        <View style={[styles.artworkContainer, { width: artworkSize }]}>
           <BookCover title={book.title} uri={book.cover_image_url} fill radius={Radius.xl} />
         </View>
 
-        <Text style={styles.bookTitle}>{book.title}</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoText}>
+            <Text style={styles.bookTitle} numberOfLines={2}>
+              {book.title}
+            </Text>
+            <View style={styles.channelLine}>
+              {channelName ? (
+                <Pressable
+                  onPress={openChannel}
+                  disabled={!channelId}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.channelLink, pressed && styles.pressed]}
+                  accessibilityRole="link"
+                  accessibilityLabel={tx(`চ্যানেল: ${channelName}`, `Channel: ${channelName}`)}
+                >
+                  <Text style={styles.channelName} numberOfLines={1}>
+                    {channelName}
+                  </Text>
+                </Pressable>
+              ) : book.author ? (
+                <Text style={styles.channelName} numberOfLines={1}>
+                  {book.author}
+                </Text>
+              ) : null}
+              {channel ? (
+                <FollowButton pill channel={channel} onChange={(next) => update({ channel: { ...channel, ...next } })} />
+              ) : null}
+            </View>
+          </View>
+          {isMember ? (
+            <Pressable
+              onPress={toggleSave}
+              disabled={busy === 'save'}
+              hitSlop={8}
+              style={({ pressed }) => [styles.favourite, saved && styles.favouriteOn, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: saved }}
+              accessibilityLabel={saved ? tx('ফেভারিট থেকে সরান', 'Remove from favourites') : tx('ফেভারিটে যোগ করুন', 'Add to favourites')}
+            >
+              <Ionicons name={saved ? 'heart' : 'heart-outline'} size={26} color={saved ? Colors.error : Colors.textPrimary} />
+            </Pressable>
+          ) : null}
+        </View>
+
         <Text style={styles.chapterSubtitle} numberOfLines={1}>
-          {chapter
-            ? `${tx('অধ্যায়', 'Chapter')} ${chapter.chapter_number}/${chapters.length} · ${chapter.title}`
-            : isLocked
-              ? tx('প্রিমিয়াম অডিওবুক', 'Premium audiobook')
-              : tx('লোড হচ্ছে…', 'Loading…')}
+          {[
+            channelName && book.author ? book.author : null,
+            chapter
+              ? `${tx('অধ্যায়', 'Chapter')} ${chapter.chapter_number}/${chapters.length} · ${chapter.title}`
+              : isLocked
+                ? tx('প্রিমিয়াম অডিওবুক', 'Premium audiobook')
+                : tx('লোড হচ্ছে…', 'Loading…'),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
 
         <View style={styles.badgeRow}>
@@ -312,28 +376,6 @@ export function PlayerScreen() {
           />
           {book.genre ? <TagBadge label={genreLabel(book.genre, isEnglish)} variant="genre" /> : null}
         </View>
-
-        {channel ? (
-          <Pressable
-            style={({ pressed }) => [styles.channelRow, pressed && styles.pressed]}
-            onPress={() => navigation.navigate('ChannelProfile', { channelId: channel.id })}
-            accessibilityRole="button"
-            accessibilityLabel={channel.name}
-          >
-            <View style={styles.channelAvatar}>
-              <Text style={styles.channelInitial}>{channel.name.slice(0, 1).toUpperCase()}</Text>
-            </View>
-            <View style={styles.channelText}>
-              <Text style={styles.channelName} numberOfLines={1}>
-                {channel.name}
-              </Text>
-              <Text style={styles.channelMeta}>
-                {tx(`${channel.followers} জন ফলোয়ার`, `${channel.followers} ${channel.followers === 1 ? 'follower' : 'followers'}`)}
-              </Text>
-            </View>
-            <FollowButton compact channel={channel} onChange={(next) => update({ channel: { ...channel, ...next } })} />
-          </Pressable>
-        ) : null}
 
         {shownError ? (
           <View style={styles.errorBanner}>
@@ -548,6 +590,25 @@ export function PlayerScreen() {
         </View>
       </ModalBottomSheet>
 
+      <ModalBottomSheet visible={sheet === 'more'} onClose={() => setSheet(null)}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle} numberOfLines={1}>
+            {book.title}
+          </Text>
+          {moreOptions.map((option) => (
+            <Pressable
+              key={option.id}
+              onPress={option.onPress}
+              style={({ pressed }) => [styles.menuRow, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <Ionicons name={option.icon} size={22} color={option.destructive ? Colors.error : Colors.textPrimary} />
+              <Text style={[styles.menuText, option.destructive && styles.menuTextDestructive]}>{option.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </ModalBottomSheet>
+
       <ReportSheet audiobookId={book.id} visible={sheet === 'report'} onClose={() => setSheet(null)} />
     </SafeAreaView>
   );
@@ -559,13 +620,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   scrollContent: {
+    width: '100%',
+    maxWidth: 600,
+    alignSelf: 'center',
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.xs,
     paddingBottom: Spacing.xl,
     alignItems: 'center',
   },
   artworkContainer: {
-    width: '86%',
     aspectRatio: 1,
     borderRadius: Radius.xl,
     overflow: 'hidden',
@@ -577,65 +640,77 @@ const styles = StyleSheet.create({
     elevation: 5,
     marginVertical: Spacing.sm,
   },
+  infoRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.md,
+    marginTop: Spacing.md,
+  },
+  infoText: {
+    flex: 1,
+    gap: Spacing.sm,
+  },
   bookTitle: {
     fontSize: FontSizes.xl + 2,
     fontWeight: '800',
     color: Colors.textPrimary,
     letterSpacing: -0.2,
-    marginTop: Spacing.md,
-    textAlign: 'center',
+  },
+  channelLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  channelLink: {
+    flexShrink: 1,
+    maxWidth: '62%',
+  },
+  channelName: {
+    fontSize: FontSizes.base,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  favourite: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favouriteOn: {
+    backgroundColor: Colors.tintError,
   },
   chapterSubtitle: {
+    alignSelf: 'stretch',
     fontSize: FontSizes.sm,
     color: Colors.textSecondary,
     fontWeight: '500',
-    marginTop: 4,
-    textAlign: 'center',
+    marginTop: Spacing.sm,
   },
   badgeRow: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
     gap: Spacing.xs,
     marginTop: Spacing.sm,
   },
-  channelRow: {
-    width: '100%',
+  menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
-    padding: Spacing.sm,
-    paddingLeft: Spacing.md,
-    borderRadius: Radius.lg,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    gap: Spacing.md,
+    minHeight: 52,
+    paddingHorizontal: Spacing.xs,
   },
-  channelAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  channelInitial: {
+  menuText: {
     fontSize: FontSizes.base,
-    fontWeight: '700',
-    color: Colors.textOnPrimary,
-  },
-  channelText: {
-    flex: 1,
-  },
-  channelName: {
-    fontSize: FontSizes.sm,
-    fontWeight: '700',
+    fontWeight: '500',
     color: Colors.textPrimary,
   },
-  channelMeta: {
-    fontSize: FontSizes.xs,
-    color: Colors.textSecondary,
+  menuTextDestructive: {
+    color: Colors.error,
   },
   errorBanner: {
     width: '100%',

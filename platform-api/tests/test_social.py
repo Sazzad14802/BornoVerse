@@ -188,3 +188,34 @@ async def test_catalog_shows_channel_name_and_channels_are_searchable(client, db
     again = (await client.get('/api/v1/channels?q=stor', headers=headers)).json()[0]
     assert again["following"] is True and again["notify"] is True and again["followers"] == 1
     assert (await client.get('/api/v1/channels?q=zzz', headers=headers)).json() == []
+
+
+async def test_registration_needs_email_code(client, monkeypatch):
+    monkeypatch.setattr(settings, "REQUIRE_EMAIL_VERIFICATION", True)
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    monkeypatch.setattr(settings, "BREVO_API_KEY", "")
+    monkeypatch.setattr(settings, "SMTP_HOST", "")
+    body = {"username": "newreader", "email": "new@example.com", "password": "Reading2026"}
+    # Weak passwords are refused.
+    assert (await client.post('/api/v1/auth/register', json={**body, "password": "short1"})).status_code == 422
+    assert (await client.post('/api/v1/auth/register', json={**body, "password": "onlyletters"})).status_code == 422
+    # No code, no account.
+    assert (await client.post('/api/v1/auth/register', json=body)).status_code == 400
+
+    started = await client.post('/api/v1/auth/register/start', json={"email": "New@Example.com", "username": "newreader"})
+    assert started.status_code == 200, started.text
+    code = started.json()["dev_code"]
+    wrong = "000000" if code != "000000" else "111111"
+    assert (await client.post('/api/v1/auth/register', json={**body, "email_code": wrong})).status_code == 400
+    created = await client.post('/api/v1/auth/register', json={**body, "email_code": code})
+    assert created.status_code == 201, created.text
+    # The code works once, and a taken email cannot start again.
+    assert (await client.post('/api/v1/auth/register/start', json={"email": "new@example.com"})).status_code == 409
+
+
+async def test_registration_without_verification_when_disabled(client, monkeypatch):
+    monkeypatch.setattr(settings, "REQUIRE_EMAIL_VERIFICATION", False)
+    started = await client.post('/api/v1/auth/register/start', json={"email": "free@example.com"})
+    assert started.json() == {"verification_required": False}
+    assert (await client.post('/api/v1/auth/register', json={
+        "username": "freeuser", "email": "free@example.com", "password": "Reading2026"})).status_code == 201

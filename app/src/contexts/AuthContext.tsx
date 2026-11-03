@@ -24,6 +24,9 @@ interface AuthContextValue extends AuthState {
   acceptSession: (response: TokenResponse) => Promise<void>;
   login: (data: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
+  /** True right after this device created the account (shows onboarding). */
+  isNewAccount: boolean;
+  finishOnboarding: () => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   setUser: (user: User) => void;
@@ -35,6 +38,8 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({ ...signedOut, isLoading: true });
+  const [isNewAccount, setNewAccount] = useState(false);
+  const finishOnboarding = useCallback(() => setNewAccount(false), []);
 
   const clearLocalSession = useCallback(async () => {
     await authStorage.deleteToken().catch(() => {});
@@ -97,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = useCallback(
     async (data: RegisterRequest) => {
       await authApi.register(data);
+      setNewAccount(true);
       await acceptSession(
         await authApi.login({
           username_or_email: data.email,
@@ -128,8 +134,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ ...state, acceptSession, login, register, logout, refreshUser, setUser }),
-    [state, acceptSession, login, register, logout, refreshUser, setUser],
+    () => ({ ...state, acceptSession, login, register, logout, refreshUser, setUser, isNewAccount, finishOnboarding }),
+    [state, acceptSession, login, register, logout, refreshUser, setUser, isNewAccount, finishOnboarding],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

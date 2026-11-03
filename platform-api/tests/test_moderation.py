@@ -187,3 +187,29 @@ async def test_dismissed_report_closes_without_penalty(client, db_session, owner
     assert dismissed.json()["status"] == "dismissed"
     assert (await client.get('/api/v1/me/moderation', headers=owner_tokens['headers'])).json()["cases"] == []
     assert await db_session.scalar(select(func.count()).select_from(UserStrike)) == 0
+
+
+async def test_direct_hide_opens_appealable_case_and_appeals_are_listed(client, db_session, owner_tokens, admin):
+    book = await public_book(db_session, owner_tokens['user'], 'free')
+    owner = owner_tokens['headers']
+    for _ in range(2):  # Admins may open more than one case on the same audiobook.
+        hidden = await client.post(f'/api/v1/admin/moderation/audiobooks/{book.id}', headers=admin,
+                                   json={"action": "restrict", "reason": "Unlicensed recording"})
+        assert hidden.status_code == 200, hidden.text
+        await client.post(f'/api/v1/admin/moderation/audiobooks/{book.id}', headers=admin,
+                          json={"action": "restore", "reason": "Cleared"})
+    await client.post(f'/api/v1/admin/moderation/audiobooks/{book.id}', headers=admin,
+                      json={"action": "restrict", "reason": "Unlicensed recording"})
+    assert (await client.get('/api/v1/audiobooks')).json()["total"] == 0
+
+    case = next(c for c in (await client.get('/api/v1/me/moderation', headers=owner)).json()["cases"]
+                if c["status"] == "action_taken")
+    assert case["can_appeal"] is True
+    assert (await client.post(f"/api/v1/moderation/cases/{case['report_id']}/appeal", headers=owner, json={
+        "reason": "have_permission", "explanation": "The narrator gave written permission."})).status_code == 200
+
+    appeals = (await client.get('/api/v1/me/appeals', headers=owner)).json()
+    assert len(appeals) == 1 and appeals[0]["status"] == "pending"
+    assert appeals[0]["audiobook"]["title"] == book.title and appeals[0]["case_status"] == "appealed"
+    notice = (await notices(db_session, owner_tokens['user']['id'], "moderation.notice"))[-1]
+    assert "Unlicensed recording" in notice.body and notice.data["report_id"] == case["report_id"]

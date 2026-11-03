@@ -25,8 +25,11 @@ export function openNotificationTarget(data: Record<string, unknown> | undefined
     navigationRef.navigate('ProfileTab', { screen: 'Profile' } as any);
   } else if (kind.startsWith('publisher.') || kind.startsWith('withdrawal.')) {
     navigationRef.navigate('ProfileTab', { screen: 'Publisher' } as any);
+  } else if (kind.startsWith('moderation.appeal')) {
+    navigationRef.navigate('ProfileTab', { screen: 'Appeals' } as any);
   } else if (kind.startsWith('moderation.')) {
-    navigationRef.navigate('ProfileTab', { screen: 'AccountStatus' } as any);
+    // The warning and the Appeal button live in the Publisher studio.
+    navigationRef.navigate('ProfileTab', { screen: 'Publisher' } as any);
   } else {
     navigationRef.navigate('HomeTab', { screen: 'Notifications' } as any);
   }

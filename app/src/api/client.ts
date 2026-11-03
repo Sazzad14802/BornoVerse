@@ -124,7 +124,8 @@ function xhrTransport(formData: FormData, headers: Record<string, string>, optio
         xhr.timeout = timeoutMs;
         if (options.onProgress) {
           xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable && event.total > 0) options.onProgress?.(event.loaded / event.total);
+            // Android can count multipart overhead in `loaded`; hold at 99% until the server replies.
+            if (event.lengthComputable && event.total > 0) options.onProgress?.(Math.min(0.99, event.loaded / event.total));
           };
         }
         options.signal?.addEventListener('abort', () => xhr.abort());

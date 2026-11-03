@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from sqlalchemy import delete, select, func
 from app.api.deps import DatabaseDep, MemberDep, ActivePublisherDep
 from app.models import User, Audiobook, PlaybackProgress
-from app.models.platform import (PublisherApplication, Channel, Plan, Order, Withdrawal, Ledger,
+from app.models.platform import (Audit, PublisherApplication, Channel, Plan, Order, Withdrawal, Ledger,
     EligibleView, Report, Playlist, PlaylistBook, Quota)
 from app.schemas.platform import ChannelInput, PlaylistInput, OrderInput, CallbackInput, WithdrawalInput, ReportInput, ProfileInput
 from app.schemas.user import UserRead
@@ -115,9 +115,38 @@ async def channel_update(id: UUID, data: ChannelInput, db: DatabaseDep, user: Ac
     await db.commit()
     return record(row)
 
+@router.delete("/publisher/channels/{id}")
+async def channel_delete(id: UUID, db: DatabaseDep, user: MemberDep):
+    """Delete the publisher's channel. Its audiobooks stay in My audiobooks as
+    private drafts, hidden from listeners; a new channel can be created later."""
+    from app.services.account_service import delete_channel
+    row = await db.get(Channel, id)
+    if not row or row.owner_id != user.id:
+        raise HTTPException(404, "Channel not found")
+    if row.moderated:
+        raise HTTPException(409, "A channel restricted by an administrator cannot be deleted")
+    moved = await delete_channel(db, row)
+    audit(db, user, "channel.deleted", id, audiobooks_moved=moved)
+    await db.commit()
+    return {"deleted": True, "audiobooks_kept": moved}
+
 @router.get("/subscriptions/plans")
 async def plans(db: DatabaseDep):
     return [record(r) for r in (await db.scalars(select(Plan).where(Plan.active.is_(True)).order_by(Plan.months))).all()]
+
+@router.get("/subscriptions/current")
+async def current_subscription(db: DatabaseDep, user: MemberDep):
+    """The active plan and the plans that count as an upgrade (longer ones).
+    With no active Premium every plan is available; on the longest plan none is."""
+    current = await billing.current_plan(db, user)
+    plans = (await db.scalars(select(Plan).where(Plan.active.is_(True)).order_by(Plan.months))).all()
+    upgrades = [p for p in plans if not current or p.months > current.months]
+    return {
+        "plan": {"id": str(current.id) if current.id else None, "name": current.name, "months": current.months} if current else None,
+        "premium_until": user.premium_until,
+        "upgrade_plan_ids": [str(p.id) for p in upgrades],
+        "is_highest": bool(current) and not upgrades,
+    }
 
 @router.post("/subscriptions/cancel")
 async def cancel_subscription(db: DatabaseDep, user: MemberDep):
@@ -133,6 +162,39 @@ async def payments(db: DatabaseDep, user: MemberDep):
     rows = await db.scalars(select(Order).where(Order.user_id == user.id, Order.status == "success")
                             .order_by(Order.created_at.desc()).limit(100))
     return [record(r) for r in rows.all()]
+
+@router.get("/payments/{id}/invoice")
+async def invoice(id: UUID, db: DatabaseDep, user: MemberDep):
+    """Invoice details of a completed payment (the app renders and saves the PDF)."""
+    order = await db.scalar(select(Order).where(Order.id == id, Order.user_id == user.id, Order.status == "success"))
+    if not order:
+        raise HTTPException(404, "Payment not found")
+    plan = await db.get(Plan, order.plan_id) if order.plan_id else None
+    settled = await db.scalar(select(Audit).where(Audit.action == "payment.success", Audit.target == str(order.id))
+                              .order_by(Audit.created_at.desc()).limit(1))
+    details = settled.details if settled else {}
+    paid_at = settled.created_at if settled else order.updated_at
+    if order.kind == "subscription":
+        item, item_bn = (f"BornoVerse Premium · {plan.name if plan else ''} ({order.months} month{'s' if order.months != 1 else ''})",
+                         f"বর্ণভার্স প্রিমিয়াম · {plan.name if plan else ''} ({order.months} মাস)")
+    else:
+        item, item_bn = "Publisher registration fee", "প্রকাশক নিবন্ধন ফি"
+    return {
+        "invoice_number": f"BV-{paid_at:%Y%m%d}-{str(order.id)[:8].upper()}",
+        "order_id": str(order.id),
+        "issued_at": paid_at,
+        "status": order.status,
+        "customer": {"name": user.full_name or user.username, "email": user.email, "serial": user.serial},
+        "item": item,
+        "item_bn": item_bn,
+        "kind": order.kind,
+        "months": order.months,
+        "amount": str(order.amount),
+        "currency": "BDT",
+        "provider": order.provider,
+        "transaction_id": str(order.id),
+        "bank_transaction_id": details.get("bank_tran_id") or None,
+    }
 
 @router.post("/payments")
 async def initiate(data: OrderInput, db: DatabaseDep, user: MemberDep):

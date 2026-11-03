@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation
 from abc import ABC, abstractmethod
 import logging
+from types import SimpleNamespace
 from typing import Optional
 import uuid
 import httpx
@@ -128,6 +129,20 @@ def add_months(value, months):
                          day=min(value.day, calendar.monthrange(year, month + 1)[1]))
 
 
+async def current_plan(db, user):
+    """The plan of the latest successful subscription while Premium is active."""
+    if not user.premium_until or utc(user.premium_until) <= datetime.now(timezone.utc):
+        return None
+    order = await db.scalar(select(Order).where(
+        Order.user_id == user.id, Order.kind == "subscription", Order.status == "success")
+        .order_by(Order.updated_at.desc()).limit(1))
+    if not order:
+        return None
+    plan = await db.get(Plan, order.plan_id) if order.plan_id else None
+    # A deleted or changed plan still ranks by the months that were bought.
+    return plan or SimpleNamespace(id=None, name=f"{order.months} months", months=order.months)
+
+
 async def initiate(db, user, data):
     gateway = payment_gateway()
     await db.execute(select(User).where(User.id == user.id).with_for_update())
@@ -143,6 +158,10 @@ async def initiate(db, user, data):
         plan = await db.get(Plan, data.plan_id) if data.plan_id else None
         if not plan or not plan.active:
             raise HTTPException(404, "Active subscription plan not found")
+        current = await current_plan(db, user)
+        if current and plan.months <= current.months:
+            # While Premium is active only a longer (higher) plan can be bought.
+            raise HTTPException(409, "You already have this plan or a higher one. Choose an upgrade.")
         amount, months = plan.price, plan.months
     else:
         if data.plan_id or user.account_type != "user" or user.publisher_status != "approved_pending_payment":

@@ -32,6 +32,8 @@ export interface RegisterRequest {
   email: string;
   password: string;
   full_name?: string;
+  /** The 6-digit code from the verification email. */
+  email_code?: string;
 }
 
 export interface LoginRequest {

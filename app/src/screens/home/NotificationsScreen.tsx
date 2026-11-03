@@ -6,12 +6,13 @@
  */
 
 import React from 'react';
-import { Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { StateView } from '../../components/StateView';
 import { AppNotification, notificationsApi } from '../../api/notifications';
+import { errorMessage } from '../../api/client';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
 import { useResource } from '../../hooks/useResource';
@@ -70,10 +71,19 @@ export function NotificationsScreen() {
     openNotificationTarget({ ...item.data, kind: item.kind });
   };
 
+  // Optimistic: everything turns read at once; restored if the server refuses.
   const markAll = async () => {
-    await notificationsApi.markAllRead().catch(() => {});
+    const before = inbox.data;
+    const at = new Date().toISOString();
+    inbox.setData((current) => (current ?? []).map((n) => ({ ...n, read_at: n.read_at ?? at })));
     setUnreadCount(0);
-    inbox.setData((current) => (current ?? []).map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })));
+    try {
+      await notificationsApi.markAllRead();
+    } catch (error) {
+      inbox.setData(before ?? []);
+      setUnreadCount(unread);
+      Alert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
+    }
   };
 
   const enable = async () => {
@@ -86,8 +96,9 @@ export function NotificationsScreen() {
       <AppHeader
         title={tx('নোটিফিকেশন', 'Notifications')}
         subtitle={unread ? tx(`${unread}টি অপঠিত`, `${unread} unread`) : undefined}
-        rightActionText={unread ? tx('সব পঠিত', 'Mark all read') : undefined}
-        onRightAction={unread ? markAll : undefined}
+        rightActionText={tx('সব পঠিত', 'Mark all read')}
+        onRightAction={markAll}
+        rightActionDisabled={!unread}
       />
 
       <SectionList
@@ -158,7 +169,7 @@ export function NotificationsScreen() {
                   {isUnread ? <View style={styles.dot} /> : null}
                 </View>
                 {item.body ? (
-                  <Text style={styles.itemBody} numberOfLines={3}>
+                  <Text style={styles.itemBody}>
                     {item.body}
                   </Text>
                 ) : null}

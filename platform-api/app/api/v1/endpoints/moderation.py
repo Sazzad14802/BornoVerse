@@ -74,7 +74,8 @@ async def create_report(data: ReportInput, db: DatabaseDep, user: MemberDep):
     book = await get_audiobook_for_user(db, data.audiobook_id, user)
     if book.owner_id == user.id:
         raise HTTPException(403, "You cannot report your own audiobook")
-    if await db.scalar(select(Report.id).where(Report.user_id == user.id, Report.audiobook_id == book.id)):
+    if await db.scalar(select(Report.id).where(Report.user_id == user.id, Report.audiobook_id == book.id,
+                                               Report.source == "listener")):
         raise HTTPException(409, "You have already reported this audiobook")
     recent = await db.scalar(select(func.count()).select_from(Report).where(
         Report.user_id == user.id, Report.created_at >= mod.now() - timedelta(days=1)))
@@ -146,6 +147,29 @@ async def my_moderation(db: DatabaseDep, user: MemberDep):
 class AppealInput(BaseModel):
     reason: AppealReason
     explanation: str = Field(min_length=10, max_length=5000)
+
+
+@router.get("/me/appeals")
+async def my_appeals(db: DatabaseDep, user: MemberDep):
+    """Every appeal the user has made, newest first, with the case and decision."""
+    rows = (await db.scalars(select(ContentAppeal).where(ContentAppeal.user_id == user.id)
+                             .order_by(ContentAppeal.created_at.desc()))).all()
+    result = []
+    for a in rows:
+        report = await db.get(Report, a.report_id)
+        book = await db.get(Audiobook, report.audiobook_id) if report else None
+        files = await db.scalar(select(func.count()).select_from(ModerationEvidence).where(
+            ModerationEvidence.appeal_id == a.id))
+        result.append({
+            "id": str(a.id), "report_id": str(a.report_id), "status": a.status, "reason": a.reason,
+            "explanation": a.explanation, "decision_note": a.decision_note, "created_at": iso(a.created_at),
+            "decided_at": iso(a.decided_at), "files": files or 0,
+            "violation": report.violation if report else None,
+            "violation_label": mod.category_label(report.violation) if report else None,
+            "case_status": report.status if report else None,
+            "audiobook": {"id": str(book.id), "title": book.title} if book else None,
+        })
+    return result
 
 
 @router.post("/moderation/cases/{report_id}/appeal")

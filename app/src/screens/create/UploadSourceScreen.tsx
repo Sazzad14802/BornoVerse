@@ -94,7 +94,7 @@ export function UploadSourceScreen() {
     }
   };
 
-  const percent = Math.round(progress * 100);
+  const percent = Math.round(Math.max(0, Math.min(1, progress)) * 100);
   const heading =
     stage === 'uploading'
       ? tx('আপলোড হচ্ছে…', 'Uploading…')

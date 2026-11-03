@@ -1,11 +1,11 @@
 /**
  * BookCover — shows the uploaded cover, or a typographic cover generated from the
- * title when none exists. The palette is derived from the title so a book always
+ * title when none exists: one solid colour with the title's first letter. The palette is derived from the title so a book always
  * gets the same artwork, without inventing stock imagery.
  */
 
 import React, { useState } from 'react';
-import { Image, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Image, LayoutChangeEvent, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { resolveMediaUrl } from '../config';
 import { Radius } from '../theme';
 
@@ -38,6 +38,8 @@ interface BookCoverProps {
 
 export function BookCover({ title, uri, size = 58, width, height, radius = Radius.md, fill, style }: BookCoverProps) {
   const [failed, setFailed] = useState(false);
+  // A filling cover sizes its initial from the measured box.
+  const [measured, setMeasured] = useState(0);
   const w = width ?? size;
   const h = height ?? size;
   const source = resolveMediaUrl(uri);
@@ -58,10 +60,17 @@ export function BookCover({ title, uri, size = 58, width, height, radius = Radiu
 
   const [ink, paper] = paletteFor(title || '?');
   const initial = Array.from((title || '?').trim())[0] ?? '?';
+  const side = fill ? measured || w : Math.min(w, h);
   return (
-    <View style={[frame, styles.generated, { backgroundColor: paper }, style]}>
-      <View style={[styles.spine, { backgroundColor: ink }]} />
-      <Text style={[styles.initial, { color: ink, fontSize: Math.round(Math.min(w, h) * 0.42) }]}>
+    <View
+      style={[frame, styles.generated, { backgroundColor: paper }, style]}
+      onLayout={
+        fill
+          ? (e: LayoutChangeEvent) => setMeasured(Math.min(e.nativeEvent.layout.width, e.nativeEvent.layout.height))
+          : undefined
+      }
+    >
+      <Text style={[styles.initial, { color: ink, fontSize: Math.round(side * 0.42) }]}>
         {initial}
       </Text>
     </View>
@@ -76,14 +85,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-  },
-  spine: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '9%',
-    opacity: 0.85,
   },
   initial: {
     fontWeight: '800',

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 from typing import Optional
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Numeric, JSON, Uuid, UniqueConstraint
+from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Index, Numeric, JSON, Uuid, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDPrimaryKeyMixin, TimestampMixin
 
@@ -72,7 +72,9 @@ class Report(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     or dismissed. One report per listener per audiobook.
     """
     __tablename__ = "content_reports"
-    __table_args__ = (UniqueConstraint("user_id", "audiobook_id", name="uq_report_once_per_user"),)
+    # One report per listener per audiobook; admins may open several cases.
+    __table_args__ = (Index("uq_report_once_per_listener", "user_id", "audiobook_id", unique=True,
+                            postgresql_where=text("source = 'listener'"), sqlite_where=text("source = 'listener'")),)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     audiobook_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("audiobooks.id"))
     reason: Mapped[str] = mapped_column(Text)
@@ -84,6 +86,8 @@ class Report(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
     violation: Mapped[Optional[str]] = mapped_column(String(30))
     appeal_deadline: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # "listener" (a report) or "admin" (opened by a moderator directly).
+    source: Mapped[str] = mapped_column(String(10), default="listener", server_default="listener")
 
 class Quota(Base):
     __tablename__ = "generation_quotas"
@@ -147,6 +151,16 @@ class PlaylistBook(Base):
     __tablename__ = "playlist_books"
     playlist_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("playlists.id", ondelete="CASCADE"), primary_key=True)
     audiobook_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("audiobooks.id", ondelete="CASCADE"), primary_key=True)
+
+class EmailVerification(Base, UUIDPrimaryKeyMixin):
+    """A 6-digit code emailed before registration; only its hash is stored."""
+    __tablename__ = "email_verifications"
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    digest: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class RecoveryToken(Base):
     __tablename__ = "recovery_tokens"

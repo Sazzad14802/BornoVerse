@@ -14,9 +14,18 @@ export const authApi = {
         full_name: data.full_name?.trim() ?? '',
         email: data.email.trim().toLowerCase(),
         password: data.password,
+        email_code: data.email_code || undefined,
       },
       false,
     );
+  },
+
+  /** Checks email/username are free and emails a sign-up code (unless the server skips verification). */
+  registerStart(
+    email: string,
+    username = '',
+  ): Promise<{ verification_required: boolean; resend_after?: number; dev_code?: string }> {
+    return apiClient.post('/auth/register/start', { email: email.trim().toLowerCase(), username }, false);
   },
 
   login(data: LoginRequest): Promise<TokenResponse> {

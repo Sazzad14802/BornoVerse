@@ -4,6 +4,10 @@
  * 3. pay the registration fee, 4. create the one channel, then manage it,
  *    earnings and withdrawals here. Publishing happens in the channel
  *    (ChannelScreen), organised with playlists.
+ * The setup steps show only until the account is active. If moderation
+ * restricts the publisher's content, a red warning with an Appeal button
+ * appears at the top; once they have appealed, "Appeal history" stays here.
+ * The channel can be deleted (its audiobooks stay private) and created again.
  */
 
 import React, { useState } from 'react';
@@ -18,6 +22,7 @@ import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { StateView } from '../../components/StateView';
 import { TagBadge } from '../../components/TagBadge';
 import { paymentsApi, publisherApi } from '../../api/account';
+import { moderationApi } from '../../api/moderation';
 import { errorMessage } from '../../api/client';
 import { PickedFile } from '../../api/upload';
 import { useAuth } from '../../contexts/AuthContext';
@@ -40,13 +45,15 @@ export function PublisherScreen() {
 
   const data = useResource(async () => {
     await refreshUser();
-    const [applications, fee, dashboard, channels] = await Promise.all([
+    const [applications, fee, dashboard, channels, standing, appeals] = await Promise.all([
       publisherApi.applications(),
       publisherApi.registrationFee().catch(() => null),
       active ? publisherApi.dashboard() : Promise.resolve(null),
       active ? publisherApi.channels() : Promise.resolve([]),
+      moderationApi.standing().catch(() => null),
+      moderationApi.appeals().catch(() => []),
     ]);
-    return { applications, fee, dashboard, channels };
+    return { applications, fee, dashboard, channels, standing, appeals };
   }, [active]);
 
   const [legalName, setLegalName] = useState(user?.full_name ?? '');
@@ -119,6 +126,37 @@ export function PublisherScreen() {
 
   const dashboard = data.data?.dashboard;
   const myChannel = data.data?.channels[0];
+  const standing = data.data?.standing;
+  const appealable = standing?.cases.filter((c) => c.can_appeal) ?? [];
+  const restrictedUntil = standing?.publishing_restricted_until;
+  const underAction = standing?.cases.filter((c) => c.status === 'action_taken') ?? [];
+  const showWarning = !!restrictedUntil || underAction.length > 0;
+  const hasAppeals = (data.data?.appeals.length ?? 0) > 0;
+
+  const deleteChannel = (channel: Channel) =>
+    Alert.alert(
+      tx('চ্যানেল মুছবেন?', 'Delete this channel?'),
+      tx(
+        `«${channel.name}» মুছে যাবে, ফলোয়ার ও চ্যানেলের প্লেলিস্টও। অডিওবুকগুলো মুছবে না — "আমার অডিওবুক"-এ প্রাইভেট হয়ে থাকবে, শ্রোতারা দেখবে না। পরে নতুন চ্যানেল খুলতে পারবেন।`,
+        `“${channel.name}”, its followers and channel playlists will be removed. Your audiobooks are not deleted: they stay private in My audiobooks, hidden from listeners. You can create a new channel later.`,
+      ),
+      [
+        { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
+        {
+          text: tx('মুছুন', 'Delete'),
+          style: 'destructive',
+          onPress: () =>
+            run('delete-channel', async () => {
+              const result = await publisherApi.deleteChannel(channel.id);
+              await data.reload();
+              Alert.alert(
+                tx('চ্যানেল মুছে ফেলা হয়েছে', 'Channel deleted'),
+                tx(`${result.audiobooks_kept}টি অডিওবুক প্রাইভেট হিসেবে রাখা হয়েছে।`, `${result.audiobooks_kept} audiobooks were kept as private.`),
+              );
+            }),
+        },
+      ],
+    );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -127,6 +165,55 @@ export function PublisherScreen() {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={data.isRefreshing} onRefresh={data.refresh} tintColor={Colors.primary} />}
       >
+        {showWarning ? (
+          <View style={styles.warning}>
+            <View style={styles.warningHead}>
+              <Ionicons name="warning" size={22} color={Colors.tintErrorText} />
+              <Text style={styles.warningTitle}>{tx('আপনার কনটেন্টে ব্যবস্থা নেওয়া হয়েছে', 'Action was taken on your content')}</Text>
+            </View>
+            {underAction.map((c) => (
+              <Text key={c.report_id} style={styles.warningText}>
+                «{c.audiobook.title}»
+              </Text>
+            ))}
+            {restrictedUntil ? (
+              <Text style={styles.warningText}>
+                {tx(
+                  `প্রকাশের সুবিধা ${formatDate(restrictedUntil, false)} পর্যন্ত সীমিত।`,
+                  `Publishing is restricted until ${formatDate(restrictedUntil, true)}.`,
+                )}
+              </Text>
+            ) : null}
+            {appealable.length ? (
+              <>
+                <Text style={styles.warningText}>
+                  {tx(
+                    `সিদ্ধান্ত ভুল মনে হলে ${formatDate(appealable[0].appeal_deadline, false)}-এর মধ্যে আপিল করুন।`,
+                    `If you think this is a mistake, appeal by ${formatDate(appealable[0].appeal_deadline, true)}.`,
+                  )}
+                </Text>
+                <AppButton label={tx('আপিল করুন', 'Appeal')} variant="danger" onPress={() => navigation.navigate('AccountStatus')} />
+              </>
+            ) : (
+              <AppButton label={tx('বিস্তারিত দেখুন', 'View details')} variant="secondary" onPress={() => navigation.navigate('AccountStatus')} />
+            )}
+          </View>
+        ) : null}
+
+        {hasAppeals ? (
+          <FormCard style={styles.list}>
+            <ListRow
+              icon="document-text-outline"
+              title={tx('আপিলের ইতিহাস', 'Appeal history')}
+              subtitle={tx('আগের ও চলমান আপিল, বিস্তারিত সহ', 'Past and running appeals, with details')}
+              value={String(data.data?.appeals.length ?? '')}
+              onPress={() => navigation.navigate('Appeals')}
+              last
+            />
+          </FormCard>
+        ) : null}
+
+        {active ? null : (
         <View style={styles.steps}>
           {[tx('যাচাই', 'Verify'), tx('ফি', 'Fee'), tx('সক্রিয়', 'Active')].map((label, i) => (
             <View key={label} style={styles.step}>
@@ -141,6 +228,7 @@ export function PublisherScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {data.isLoading ? <StateView kind="loading" /> : null}
 
@@ -257,6 +345,13 @@ export function PublisherScreen() {
                   title={tx('পাবলিক পেজ দেখুন', 'View public page')}
                   subtitle={tx('শ্রোতারা যেভাবে দেখেন', 'As listeners see it')}
                   onPress={() => navigation.navigate('ChannelProfile', { channelId: myChannel.id })}
+                />
+                <ListRow
+                  icon="trash-outline"
+                  title={tx('চ্যানেল মুছুন', 'Delete channel')}
+                  subtitle={tx('অডিওবুক প্রাইভেট হয়ে থাকবে', 'Audiobooks stay, as private')}
+                  onPress={() => deleteChannel(myChannel)}
+                  destructive
                   last
                 />
               </FormCard>
@@ -321,6 +416,30 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.xs,
     paddingBottom: Spacing.xl,
     gap: Spacing.md,
+  },
+  warning: {
+    backgroundColor: Colors.tintError,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: '#F5C2C2',
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  warningHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  warningTitle: {
+    flex: 1,
+    fontSize: FontSizes.base,
+    fontWeight: '700',
+    color: Colors.tintErrorText,
+  },
+  warningText: {
+    fontSize: FontSizes.sm,
+    color: Colors.textPrimary,
+    lineHeight: 20,
   },
   steps: {
     flexDirection: 'row',
