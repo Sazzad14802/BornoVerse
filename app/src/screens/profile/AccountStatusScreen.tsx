@@ -6,7 +6,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
@@ -33,6 +34,12 @@ const VIOLATIONS: Record<string, [string, string]> = {
   misleading: ['বিভ্রান্তিকর কনটেন্ট', 'Misleading content'],
   other: ['অন্যান্য', 'Other'],
 };
+
+/** Violation name in the app language. */
+export function violationName(key: string, english: boolean): string {
+  const pair = VIOLATIONS[key] ?? VIOLATIONS.other;
+  return english ? pair[1] : pair[0];
+}
 
 export const APPEAL_REASONS: { key: AppealReason; bn: string; en: string }[] = [
   { key: 'own_rights', bn: 'আমি এর স্বত্বাধিকারী', en: 'I own the rights' },
@@ -92,14 +99,14 @@ export function AccountStatusScreen() {
       const picked = await pickEvidence();
       if (picked) setFiles((current) => [...current, picked].slice(0, MAX_FILES));
     } catch (error) {
-      Alert.alert(tx('ফাইল', 'File'), errorMessage(error));
+      AppAlert.alert(tx('ফাইল', 'File'), errorMessage(error));
     }
   };
 
   const submitAppeal = async () => {
     if (!appealing) return;
     if (explanation.trim().length < 10) {
-      Alert.alert(tx('ব্যাখ্যা দিন', 'Add an explanation'), tx('অন্তত ১০ অক্ষরে আপনার পক্ষে ব্যাখ্যা লিখুন।', 'Explain your side in at least 10 characters.'));
+      AppAlert.alert(tx('ব্যাখ্যা দিন', 'Add an explanation'), tx('অন্তত ১০ অক্ষরে আপনার পক্ষে ব্যাখ্যা লিখুন।', 'Explain your side in at least 10 characters.'));
       return;
     }
     setBusy(true);
@@ -110,9 +117,9 @@ export function AccountStatusScreen() {
       }
       setAppealing(null);
       await data.reload();
-      Alert.alert(tx('আপিল জমা হয়েছে', 'Appeal submitted'), tx('মডারেশন টিম পর্যালোচনা করে জানাবে।', 'Our moderation team will review it and notify you.'));
+      AppAlert.alert(tx('আপিল জমা হয়েছে', 'Appeal submitted'), tx('মডারেশন টিম পর্যালোচনা করে জানাবে।', 'Our moderation team will review it and notify you.'));
     } catch (error) {
-      Alert.alert(tx('আপিল করা যায়নি', 'Could not appeal'), errorMessage(error));
+      AppAlert.alert(tx('আপিল করা যায়নি', 'Could not appeal'), errorMessage(error));
     } finally {
       setBusy(false);
     }

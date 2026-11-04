@@ -14,6 +14,12 @@ export interface AppNotification {
   created_at: string;
 }
 
+/** Title and body in the app language (the server keeps an English copy in data). */
+export function notificationText(n: AppNotification, english: boolean): { title: string; body: string } {
+  if (english && n.data?.title_en) return { title: n.data.title_en, body: n.data.body_en ?? '' };
+  return { title: n.title, body: n.body };
+}
+
 export const notificationsApi = {
   list(page = 1, size = 30): Promise<AppNotification[]> {
     return apiClient.get<AppNotification[]>(`/notifications?page=${page}&size=${size}`);

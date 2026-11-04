@@ -5,7 +5,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, Linking, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { AppHeader } from '../../components/AppHeader';
@@ -16,6 +17,8 @@ import { ChipGroup } from '../../components/Chip';
 import { Field, FormCard } from '../../components/Form';
 import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { profileApi, subscriptionApi } from '../../api/account';
+import { Avatar } from '../../components/Avatar';
+import { changePicture } from '../../utils/pictureFlow';
 import { useResource } from '../../hooks/useResource';
 import { errorMessage } from '../../api/client';
 import { offline } from '../../storage/offline';
@@ -69,7 +72,7 @@ export function ProfileScreen() {
       setUser(await profileApi.update(name.trim()));
       setEditingName(false);
     } catch (error) {
-      Alert.alert(tx('সংরক্ষণ হয়নি', 'Not saved'), errorMessage(error));
+      AppAlert.alert(tx('সংরক্ষণ হয়নি', 'Not saved'), errorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -84,6 +87,7 @@ export function ProfileScreen() {
     if (!granted) Linking.openSettings();
   };
 
+  const [pictureBusy, setPictureBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [removing, setRemoving] = useState(false);
@@ -97,14 +101,14 @@ export function ProfileScreen() {
       await offline.clear(user.id).catch(() => {});
       await logout();
     } catch (error) {
-      Alert.alert(tx('মুছা যায়নি', 'Could not delete'), errorMessage(error));
+      AppAlert.alert(tx('মুছা যায়নি', 'Could not delete'), errorMessage(error));
     } finally {
       setRemoving(false);
     }
   };
 
   const signOut = () =>
-    Alert.alert(t('logoutConfirmTitle'), t('logoutConfirmMessage'), [
+    AppAlert.alert(t('logoutConfirmTitle'), t('logoutConfirmMessage'), [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       {
         text: tx('সাইন আউট', 'Sign out'),
@@ -130,9 +134,23 @@ export function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
         <View style={styles.userCard}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarChar}>{Array.from(displayName)[0]?.toUpperCase()}</Text>
-          </View>
+          <Pressable
+            onPress={() =>
+              changePicture({
+                tx,
+                title: tx('প্রোফাইল ছবি', 'Profile picture'),
+                hasPicture: !!user.avatar_url,
+                upload: async (file) => setUser(await profileApi.uploadAvatar(file)),
+                remove: async () => setUser(await profileApi.removeAvatar()),
+                setBusy: setPictureBusy,
+              })
+            }
+            disabled={pictureBusy}
+            accessibilityRole="button"
+            accessibilityLabel={tx('প্রোফাইল ছবি বদলান', 'Change profile picture')}
+          >
+            <Avatar name={displayName} uri={user.avatar_url} size={64} editable />
+          </Pressable>
           <View style={styles.userMeta}>
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.userEmail}>{user.email}</Text>
@@ -156,9 +174,9 @@ export function ProfileScreen() {
                 ? tx(`মেয়াদ: ${formatDate(user.premium_until, false)}`, `Valid until ${formatDate(user.premium_until, true)}`)
                 : tx('প্রিমিয়াম অডিওবুক, অফলাইন ডাউনলোড ও বেশি অডিও তৈরির সুযোগ।', 'Premium audiobooks, offline downloads and more generations.')}
             </Text>
-            {plan.data?.is_highest ? null : (
+            {premium && !plan.data?.can_buy ? null : (
               <AppButton
-                label={premium ? tx('প্ল্যান আপগ্রেড করুন', 'Upgrade your plan') : tx('প্ল্যান দেখুন', 'See plans')}
+                label={premium ? tx('রিনিউ করুন', 'Renew') : tx('প্ল্যান দেখুন', 'See plans')}
                 onPress={() => navigation.navigate('Subscription')}
                 variant="compact"
                 fullWidth={false}
@@ -204,7 +222,6 @@ export function ProfileScreen() {
             options={[
               { value: 'bn', label: 'বাংলা' },
               { value: 'en', label: 'English' },
-              { value: 'mixed', label: 'বাংলা + English' },
             ]}
           />
           <ListRow

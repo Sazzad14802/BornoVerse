@@ -40,6 +40,7 @@ import { TermsScreen } from '../screens/auth/TermsScreen';
 import { FavouritesScreen } from '../screens/entry/FavouritesScreen';
 import { PaymentHistoryScreen } from '../screens/profile/PaymentHistoryScreen';
 import { PaymentDetailsScreen } from '../screens/profile/PaymentDetailsScreen';
+import { PublisherAnalyticsScreen } from '../screens/profile/PublisherAnalyticsScreen';
 import { PlayerScreen } from '../screens/audiobook/PlayerScreen';
 import { ChannelProfileScreen } from '../screens/channel/ChannelProfileScreen';
 
@@ -130,6 +131,7 @@ function ProfileStackNavigator() {
       <ProfileStack.Screen name="Appeals" component={AppealsScreen} />
       <ProfileStack.Screen name="PaymentHistory" component={PaymentHistoryScreen} />
       <ProfileStack.Screen name="PaymentDetails" component={PaymentDetailsScreen} />
+      <ProfileStack.Screen name="PublisherAnalytics" component={PublisherAnalyticsScreen} />
       {withSharedScreens(ProfileStack)}
     </ProfileStack.Navigator>
   );

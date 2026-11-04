@@ -48,8 +48,17 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
-const NETWORK_FAILURE_MESSAGE =
-  'সার্ভারের সাথে সংযোগ করা যায়নি। Wi-Fi বা ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।';
+let clientLanguage: 'bn' | 'en' = 'bn';
+
+/** Set by LanguageContext so client-side messages use the app language. */
+export function setClientLanguage(language: 'bn' | 'en') {
+  clientLanguage = language;
+}
+
+const NETWORK_FAILURE = {
+  bn: 'সার্ভারের সাথে সংযোগ করা যায়নি। Wi-Fi বা ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।',
+  en: 'Could not connect to the server. Check your Wi-Fi or internet connection and try again.',
+};
 
 function parseDetail(body: any, status: number): string {
   let detail = body?.detail ?? body?.message ?? `HTTP ${status}`;
@@ -183,7 +192,7 @@ async function execute<T>(
     throw new ApiError(result.status, parseDetail(result.body, result.status));
   }
 
-  throw new ApiError(0, NETWORK_FAILURE_MESSAGE);
+  throw new ApiError(0, NETWORK_FAILURE[clientLanguage]);
 }
 
 async function jsonRequest<T>(

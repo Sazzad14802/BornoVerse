@@ -5,7 +5,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,7 +99,7 @@ export function SearchResultsScreen() {
       await loadAudiobook(book);
       navigation.navigate('Player', { audiobookId: book.id });
     } catch (e) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(e));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(e));
     }
   };
 

@@ -13,7 +13,10 @@ import { MainNavigator } from './MainNavigator';
 import { Loading } from '../components/Loading';
 import { FavouritesScreen } from '../screens/entry/FavouritesScreen';
 import { socialApi } from '../api/social';
+import { profileApi } from '../api/account';
+import { useLanguage } from '../contexts/LanguageContext';
 import { navigationRef } from './navigationRef';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 type Gate = 'checking' | 'required' | 'done';
 
@@ -51,7 +54,19 @@ function useFavouritesGate(userId: string | undefined, isMember: boolean, isNewA
   return [gate, () => setGate('done')];
 }
 
+/** Keep the server's copy of the app language current (pushes use it). */
+function useLanguageSync() {
+  const { isAuthenticated, user, setUser } = useAuth();
+  const { language } = useLanguage();
+  useEffect(() => {
+    if (!isAuthenticated || !user || user.account_type !== 'user' || user.language === language) return;
+    profileApi.setLanguage(language).then(setUser).catch(() => {});
+  }, [isAuthenticated, user?.id, user?.language, language]);
+}
+
 export function AppNavigator() {
+  useLanguageSync();
+  const { language } = useLanguage();
   const { isLoading, isAuthenticated, user, isNewAccount, finishOnboarding } = useAuth();
   const [gate, close] = useFavouritesGate(isAuthenticated ? user?.id : undefined, user?.account_type === 'user', isNewAccount);
   const finish = () => {
@@ -68,7 +83,7 @@ export function AppNavigator() {
 
   return (
     <NavigationContainer ref={navigationRef}>
-      {isAuthenticated ? <MainNavigator /> : <AuthNavigator />}
+      <ErrorBoundary english={language === 'en'}>{isAuthenticated ? <MainNavigator /> : <AuthNavigator />}</ErrorBoundary>
     </NavigationContainer>
   );
 }

@@ -11,6 +11,7 @@ import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PersistentMiniPlayer } from '../components/PersistentMiniPlayer';
+import { useKeyboardHeight } from '../components/KeyboardInset';
 import { Colors, Spacing } from '../theme';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -30,6 +31,7 @@ export function CustomBottomTabBar({
 }: BottomTabBarProps) {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardHeight();
 
   const getTabLabel = (routeName: string) => {
     switch (routeName) {
@@ -52,6 +54,9 @@ export function CustomBottomTabBar({
   const currentRoute = state.routes[state.index];
   const focusedScreen = getFocusedRouteNameFromRoute(currentRoute);
   const hideMiniPlayer = focusedScreen === 'Player';
+
+  // While typing, the keyboard owns the bottom of the screen.
+  if (keyboard > 0) return null;
 
   return (
     <View style={[styles.wrapper, { paddingBottom: insets.bottom }]}>

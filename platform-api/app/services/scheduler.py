@@ -30,6 +30,7 @@ async def claim(db):
             from app.services.notification_service import notify
             notify(db, job.owner_id, "generation.failed", "অডিওবুক তৈরি ব্যর্থ",
                    f"«{book.title}» তৈরি করা যায়নি। আবার চেষ্টা করুন।",
+                   en=("Audiobook generation failed", f"“{book.title}” could not be generated. Please try again."),
                    audiobook_id=book.id, job_id=job.id)
     await db.flush()
     busy = set((await db.scalars(select(GenerationJob.owner_id).where(

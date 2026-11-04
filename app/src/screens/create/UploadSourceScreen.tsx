@@ -9,7 +9,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
@@ -67,7 +68,7 @@ export function UploadSourceScreen() {
       const picked = await pickDocument('pdf');
       if (picked) await upload(picked);
     } catch (e) {
-      Alert.alert(tx('ফাইল', 'File'), errorMessage(e));
+      AppAlert.alert(tx('ফাইল', 'File'), errorMessage(e));
     }
   };
 
@@ -88,7 +89,7 @@ export function UploadSourceScreen() {
       navigation.replace('GenerationStatus', { audiobookId });
     } catch (e) {
       const quota = e instanceof ApiError && e.status === 429;
-      Alert.alert(quota ? tx('মাসিক কোটা শেষ', 'Monthly quota reached') : tx('শুরু করা যায়নি', 'Could not start'), errorMessage(e));
+      AppAlert.alert(quota ? tx('মাসিক কোটা শেষ', 'Monthly quota reached') : tx('শুরু করা যায়নি', 'Could not start'), errorMessage(e));
     } finally {
       setStarting(false);
     }

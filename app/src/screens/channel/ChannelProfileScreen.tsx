@@ -4,7 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Avatar } from '../../components/Avatar';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -38,7 +40,7 @@ export function ChannelProfileScreen() {
       await loadAudiobook(book);
       open(book);
     } catch (error) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
     }
   };
 
@@ -70,7 +72,7 @@ export function ChannelProfileScreen() {
     <View>
       <View style={styles.hero}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials}</Text>
+          <Avatar name={channel.name} uri={channel.avatar_url} size={84} />
         </View>
         <Text style={styles.name}>{channel.name}</Text>
         <Text style={styles.meta}>

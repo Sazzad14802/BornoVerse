@@ -481,13 +481,4 @@ export const bnTranslations: Record<TranslationKey, string> = {
 /**
  * Mixed strategy combines English navigation labels with Bengali descriptive text.
  */
-export const mixedTranslations: Record<TranslationKey, string> = {
-  ...bnTranslations,
-  tabHome: 'Home (হোম)',
-  tabExplore: 'Search (খুঁজুন)',
-  tabLibrary: 'Library (লাইব্রেরি)',
-  tabCreate: 'Create (তৈরি)',
-  tabProfile: 'Profile (প্রোফাইল)',
-  btnStartListening: 'Play (শুরু করুন)',
-  btnResumeListening: 'Resume (চালিয়ে যান)',
-};
+

@@ -219,3 +219,44 @@ async def test_registration_without_verification_when_disabled(client, monkeypat
     assert started.json() == {"verification_required": False}
     assert (await client.post('/api/v1/auth/register', json={
         "username": "freeuser", "email": "free@example.com", "password": "Reading2026"})).status_code == 201
+
+
+PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+
+
+async def test_profile_and_channel_pictures(client, owner_tokens):
+    headers = owner_tokens['headers']
+    me = await client.post('/api/v1/users/me/avatar', headers=headers, files={"file": ("me.png", PNG, "image/png")})
+    assert me.status_code == 200, me.text
+    url = me.json()["avatar_url"]
+    assert url.startswith("/api/v1/covers/") and (await client.get(url)).status_code == 200
+    bad = await client.post('/api/v1/users/me/avatar', headers=headers, files={"file": ("x.txt", b"hello", "text/plain")})
+    assert bad.status_code == 400
+    assert (await client.delete('/api/v1/users/me/avatar', headers=headers)).json()["avatar_url"] is None
+
+    channel_id = owner_tokens['channel_id']
+    logo = await client.post(f'/api/v1/publisher/channels/{channel_id}/avatar', headers=headers,
+                             files={"file": ("logo.png", PNG, "image/png")})
+    assert logo.status_code == 200, logo.text
+    _, listener = await account(client, email="l@example.com", username="listener")
+    assert (await client.get(f'/api/v1/channels/{channel_id}', headers=listener)).json()["avatar_url"] == logo.json()["avatar_url"]
+    assert (await client.post(f'/api/v1/publisher/channels/{channel_id}/avatar', headers=listener,
+                              files={"file": ("logo.png", PNG, "image/png")})).status_code == 404
+
+
+async def test_language_and_english_notifications(client, db_session, owner_tokens):
+    fan, headers = await account(client, email="fan@example.com", username="fanuser")
+    updated = await client.patch('/api/v1/users/me', headers=headers, json={"language": "en"})
+    assert updated.status_code == 200 and updated.json()["language"] == "en"
+    assert (await client.patch('/api/v1/users/me', headers=headers, json={"language": "fr"})).status_code == 422
+    await client.put(f"/api/v1/channels/{owner_tokens['channel_id']}/follow", headers=headers, json={"notify": True})
+    book = Audiobook(owner_id=UUID(owner_tokens['user']['id']), title="New tale", language="bn",
+                     visibility=AudiobookVisibility.PRIVATE, status=AudiobookStatus.COMPLETED,
+                     publication_status="draft", channel_id=UUID(owner_tokens['channel_id']))
+    db_session.add(book)
+    await db_session.commit()
+    await client.patch(f'/api/v1/audiobooks/{book.id}/visibility', headers=owner_tokens['headers'], json={"visibility": "PUBLIC"})
+    notice = (await client.get('/api/v1/notifications', headers=headers)).json()[0]
+    assert notice["data"]["title_en"].endswith(": new audiobook") and notice["data"]["body_en"] == "New tale"

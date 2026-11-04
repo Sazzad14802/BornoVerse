@@ -57,6 +57,10 @@ async def _file_keys(db: AsyncSession, user: User) -> list[str]:
     keys += [k for k in (await db.scalars(select(Chapter.audio_url).where(Chapter.audiobook_id.in_(books)))).all() if k]
     keys += (await db.scalars(select(PublisherApplication.document_key).where(
         PublisherApplication.user_id == user.id))).all()
+    from app.models.platform import Channel
+    for url in [user.avatar_url, *(await db.scalars(select(Channel.avatar_url).where(Channel.owner_id == user.id))).all()]:
+        if url and url.startswith("/api/v1/covers/"):
+            keys.append("/uploads/covers/" + url.rsplit("/", 1)[-1])
     keys += (await db.scalars(select(ModerationEvidence.storage_key).where(
         ModerationEvidence.uploaded_by == user.id))).all()
     return [k for k in keys if k and k.startswith("/uploads/")]

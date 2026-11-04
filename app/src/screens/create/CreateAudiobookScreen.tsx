@@ -8,7 +8,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
@@ -50,7 +51,7 @@ export function CreateAudiobookScreen() {
       const picked = await pickCoverImage();
       if (picked) setCover(picked);
     } catch (error) {
-      Alert.alert(tx('কভার', 'Cover'), errorMessage(error));
+      AppAlert.alert(tx('কভার', 'Cover'), errorMessage(error));
     }
   };
 
@@ -60,7 +61,7 @@ export function CreateAudiobookScreen() {
       return;
     }
     if (quotaFull) {
-      Alert.alert(
+      AppAlert.alert(
         tx('মাসিক কোটা শেষ', 'Monthly quota reached'),
         tx('এই মাসের অডিও তৈরির সীমা পূর্ণ। প্রিমিয়ামে সীমা বেশি।', 'You have used this month’s generations. Premium has a higher limit.'),
       );
@@ -79,7 +80,7 @@ export function CreateAudiobookScreen() {
       if (cover) {
         // A failed cover upload should not lose the created audiobook.
         await audiobooksApi.uploadCover(book.id, cover).catch((error) =>
-          Alert.alert(tx('কভার আপলোড হয়নি', 'Cover not uploaded'), errorMessage(error)),
+          AppAlert.alert(tx('কভার আপলোড হয়নি', 'Cover not uploaded'), errorMessage(error)),
         );
       }
       setTitle('');
@@ -88,7 +89,7 @@ export function CreateAudiobookScreen() {
       setCover(null);
       navigation.navigate('UploadSource', { audiobookId: book.id, title: book.title });
     } catch (error) {
-      Alert.alert(tx('তৈরি করা যায়নি', 'Could not create'), errorMessage(error));
+      AppAlert.alert(tx('তৈরি করা যায়নি', 'Could not create'), errorMessage(error));
     } finally {
       setSubmitting(false);
     }

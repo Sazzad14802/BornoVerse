@@ -6,6 +6,7 @@
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Avatar } from './Avatar';
 import { FollowButton } from './FollowButton';
 import { ChannelSummary } from '../api/social';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -40,9 +41,7 @@ export function ChannelRow({
       accessibilityRole="button"
       accessibilityLabel={channel.name}
     >
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{channelInitials(channel.name)}</Text>
-      </View>
+      <Avatar name={channel.name} uri={channel.avatar_url} size={44} />
       <View style={styles.text}>
         <Text style={styles.name} numberOfLines={1}>
           {channel.name}
@@ -71,8 +70,8 @@ export function ChannelTile({ channel, onPress }: ChannelEntryProps) {
       accessibilityRole="button"
       accessibilityLabel={channel.name}
     >
-      <View style={[styles.avatar, styles.tileAvatar, channel.following && styles.followingRing]}>
-        <Text style={[styles.avatarText, styles.tileAvatarText]}>{channelInitials(channel.name)}</Text>
+      <View style={styles.tileAvatar}>
+        <Avatar name={channel.name} uri={channel.avatar_url} size={68} ring={channel.following} />
       </View>
       <Text style={styles.tileName} numberOfLines={2}>
         {channel.name}

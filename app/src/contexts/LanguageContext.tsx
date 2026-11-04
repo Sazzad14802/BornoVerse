@@ -3,7 +3,7 @@
  *
  * Design Pattern:
  * - Observer / Provider Pattern: Broadcasts language changes reactively across all screens.
- * - Strategy Pattern: Selects between Bengali, English, and Mixed translation dictionary strategies.
+ * - Strategy Pattern: Selects between the Bengali and English dictionaries.
  * - Facade Pattern: Simple useLanguage hook exposing t() helper and language state.
  */
 
@@ -11,20 +11,19 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import {
   bnTranslations,
   enTranslations,
-  mixedTranslations,
   TranslationKey,
 } from '../i18n/translations';
 import { AppLanguage, languageStorage } from '../storage/languageStorage';
+import { setClientLanguage } from '../api/client';
 
 interface LanguageContextValue {
   language: AppLanguage;
   setLanguage: (lang: AppLanguage) => Promise<void>;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
-  /** Inline bilingual string for copy not yet in the dictionaries. Mixed mode reads Bangla. */
+  /** Inline bilingual string for copy not yet in the dictionaries. */
   tx: (bangla: string, english: string) => string;
   isEnglish: boolean;
   isBangla: boolean;
-  isMixed: boolean;
 }
 
 const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
@@ -42,6 +41,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
+  // Messages produced below React (network errors) follow the language too.
+  useEffect(() => setClientLanguage(language), [language]);
+
   const setLanguage = useCallback(async (newLang: AppLanguage) => {
     setLanguageState(newLang);
     await languageStorage.saveLanguage(newLang);
@@ -53,8 +55,6 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       let dictionary: Record<TranslationKey, string>;
       if (language === 'en') {
         dictionary = enTranslations;
-      } else if (language === 'mixed') {
-        dictionary = mixedTranslations;
       } else {
         dictionary = bnTranslations;
       }
@@ -84,7 +84,6 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     tx,
     isEnglish: language === 'en',
     isBangla: language === 'bn',
-    isMixed: language === 'mixed',
   };
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;

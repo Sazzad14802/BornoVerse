@@ -6,7 +6,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { Animated, Easing, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useFocusEffect, useRoute } from '@react-navigation/native';
@@ -88,10 +89,10 @@ export function GenerationStatusScreen() {
     setBusy(name);
     try {
       await action();
-      if (success) Alert.alert(success);
+      if (success) AppAlert.alert(success);
       restartPolling();
     } catch (e) {
-      Alert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(e));
+      AppAlert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -187,7 +188,7 @@ export function GenerationStatusScreen() {
       await loadAudiobook(book, { chapterIndex: 0, resume: state === 'COMPLETED' });
       navigation.navigate('Player', { audiobookId: book.id });
     } catch (e) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(e));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -296,7 +297,7 @@ export function GenerationStatusScreen() {
             variant="text"
             isLoading={busy === 'cancel'}
             onPress={() =>
-              Alert.alert(tx('বাতিল করবেন?', 'Cancel generation?'), tx('ইতিমধ্যে তৈরি পৃষ্ঠা থেকে যাবে।', 'Pages already generated are kept.'), [
+              AppAlert.alert(tx('বাতিল করবেন?', 'Cancel generation?'), tx('ইতিমধ্যে তৈরি পৃষ্ঠা থেকে যাবে।', 'Pages already generated are kept.'), [
                 { text: tx('না', 'No'), style: 'cancel' },
                 { text: tx('হ্যাঁ, বাতিল', 'Yes, cancel'), style: 'destructive', onPress: () => act('cancel', () => generationApi.cancel(job.id)) },
               ])

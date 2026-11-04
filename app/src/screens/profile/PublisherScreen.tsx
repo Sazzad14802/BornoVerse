@@ -11,14 +11,16 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AppButton } from '../../components/AppButton';
 import { Field, FormCard } from '../../components/Form';
 import { ListRow } from '../../components/ListRow';
-import { ModalBottomSheet } from '../../components/ModalBottomSheet';
+import { ModalBottomSheet, SheetScrollView } from '../../components/ModalBottomSheet';
+import { ChipGroup } from '../../components/Chip';
 import { StateView } from '../../components/StateView';
 import { TagBadge } from '../../components/TagBadge';
 import { paymentsApi, publisherApi } from '../../api/account';
@@ -29,7 +31,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useResource } from '../../hooks/useResource';
 import { useAppNavigation } from '../../navigation/useAppNavigation';
-import { Channel } from '../../types/domain';
+import { Channel, PayoutMethod, Withdrawal } from '../../types/domain';
 import { formatDate, formatMoney, newIdempotencyKey } from '../../utils/format';
 import { pickDocument } from '../../utils/pickers';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
@@ -63,7 +65,11 @@ export function PublisherScreen() {
   const [channelDescription, setChannelDescription] = useState('');
   const [withdrawSheet, setWithdrawSheet] = useState(false);
   const [amount, setAmount] = useState('');
-  const [destination, setDestination] = useState('');
+  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>('bkash');
+  const [accountName, setAccountName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [branch, setBranch] = useState('');
 
   const latest = data.data?.applications[0];
   const awaitingReview = latest?.status === 'pending';
@@ -75,7 +81,7 @@ export function PublisherScreen() {
     try {
       await action();
     } catch (error) {
-      Alert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
+      AppAlert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
     } finally {
       setBusy(null);
     }
@@ -92,7 +98,7 @@ export function PublisherScreen() {
       if (legalName.trim().length < 2 || !document) throw new Error(tx('আইনি নাম ও PDF দুটোই দিন।', 'Enter your legal name and choose a PDF.'));
       await publisherApi.apply(legalName.trim(), document);
       setDocument(null);
-      Alert.alert(tx('আবেদন জমা হয়েছে', 'Application submitted'), tx('পর্যালোচনার পর নোটিফিকেশন পাবেন।', 'You will be notified after review.'));
+      AppAlert.alert(tx('আবেদন জমা হয়েছে', 'Application submitted'), tx('পর্যালোচনার পর নোটিফিকেশন পাবেন।', 'You will be notified after review.'));
       await data.reload();
     });
 
@@ -112,19 +118,80 @@ export function PublisherScreen() {
       openChannel(channel);
     });
 
+  const openWithdraw = () => {
+    const available = Number(data.data?.dashboard?.available_balance ?? 0);
+    if (available <= 0) {
+      AppAlert.alert(
+        tx('তোলার মতো টাকা নেই', 'Nothing to withdraw yet'),
+        tx(
+          'প্রতি মাস শেষ হলে সেই মাসের প্রিমিয়াম আয়ের অংশ আপনার ব্যালান্সে যোগ হয়। তারপর এখান থেকে তুলতে পারবেন।',
+          'When a month ends, your share of that month’s Premium income is added to your balance. You can withdraw it here then.',
+        ),
+      );
+      return;
+    }
+    setAmount('');
+    setWithdrawSheet(true);
+  };
+
   const withdraw = () =>
     run('withdraw', async () => {
       const value = Number(amount);
+      const available = Number(data.data?.dashboard?.available_balance ?? 0);
       if (!Number.isFinite(value) || value <= 0) throw new Error(tx('সঠিক পরিমাণ দিন।', 'Enter a valid amount.'));
-      if (destination.trim().length < 5) throw new Error(tx('bKash/ব্যাংক তথ্য দিন।', 'Enter a bKash or bank destination.'));
-      await publisherApi.requestWithdrawal(value.toFixed(2), destination.trim());
+      if (value > available) {
+        throw new Error(tx(`সর্বোচ্চ ${formatMoney(available)} তোলা যাবে।`, `You can withdraw at most ${formatMoney(available)}.`));
+      }
+      if (payoutMethod === 'bank') {
+        if (!bankName.trim() || !accountName.trim() || accountNumber.trim().length < 6) {
+          throw new Error(tx('ব্যাংকের নাম, অ্যাকাউন্টের নাম ও নম্বর দিন।', 'Enter the bank name, account name and account number.'));
+        }
+      } else if (!/^01[3-9]\d{8}$/.test(accountNumber.trim())) {
+        throw new Error(tx('১১ অঙ্কের সঠিক মোবাইল নম্বর দিন (01XXXXXXXXX)।', 'Enter a valid 11-digit mobile number (01XXXXXXXXX).'));
+      }
+      await publisherApi.requestWithdrawal(value.toFixed(2), {
+        method: payoutMethod,
+        account_name: accountName.trim(),
+        account_number: accountNumber.trim(),
+        bank_name: bankName.trim(),
+        branch: branch.trim(),
+      });
       setWithdrawSheet(false);
       setAmount('');
-      Alert.alert(tx('অনুরোধ জমা হয়েছে', 'Request submitted'), tx('অ্যাডমিন অনুমোদনের পর জানানো হবে।', 'You will be notified once an admin reviews it.'));
+      AppAlert.alert(
+        tx('অনুরোধ জমা হয়েছে', 'Request submitted'),
+        tx(
+          'অ্যাডমিন যাচাই করে কবে টাকা পাঠানো হবে জানাবেন, আর পাঠানোর পর রেফারেন্সসহ নোটিফিকেশন পাবেন।',
+          'An admin will review it and tell you when the money will be sent; you will get the payment reference once it is sent.',
+        ),
+      );
       await data.reload();
     });
 
-  const dashboard = data.data?.dashboard;
+  // Fill fields an older server may not send, so the studio never breaks on them.
+  const rawDashboard = data.data?.dashboard;
+  const dashboard = rawDashboard
+    ? {
+        ...rawDashboard,
+        lifetime_earned: rawDashboard.lifetime_earned ?? '0',
+        withdrawn: rawDashboard.withdrawn ?? '0',
+        pending_withdrawals: rawDashboard.pending_withdrawals ?? '0',
+        followers: rawDashboard.followers ?? 0,
+        ledger: rawDashboard.ledger ?? [],
+        withdrawals: rawDashboard.withdrawals ?? [],
+        this_month: Object.assign(
+          { month: '', estimated: '0', eligible_views: rawDashboard.eligible_views ?? 0, all_eligible_views: 0, publisher_percent: 70 },
+          rawDashboard.this_month,
+        ),
+      }
+    : undefined;
+  const withdrawalStatus = (status: Withdrawal['status']) =>
+    ({
+      pending: tx('অপেক্ষমাণ', 'Pending'),
+      approved: tx('অনুমোদিত', 'Approved'),
+      completed: tx('পাঠানো হয়েছে', 'Paid'),
+      rejected: tx('বাতিল', 'Rejected'),
+    })[status] ?? status;
   const myChannel = data.data?.channels[0];
   const standing = data.data?.standing;
   const appealable = standing?.cases.filter((c) => c.can_appeal) ?? [];
@@ -134,7 +201,7 @@ export function PublisherScreen() {
   const hasAppeals = (data.data?.appeals.length ?? 0) > 0;
 
   const deleteChannel = (channel: Channel) =>
-    Alert.alert(
+    AppAlert.alert(
       tx('চ্যানেল মুছবেন?', 'Delete this channel?'),
       tx(
         `«${channel.name}» মুছে যাবে, ফলোয়ার ও চ্যানেলের প্লেলিস্টও। অডিওবুকগুলো মুছবে না — "আমার অডিওবুক"-এ প্রাইভেট হয়ে থাকবে, শ্রোতারা দেখবে না। পরে নতুন চ্যানেল খুলতে পারবেন।`,
@@ -149,7 +216,7 @@ export function PublisherScreen() {
             run('delete-channel', async () => {
               const result = await publisherApi.deleteChannel(channel.id);
               await data.reload();
-              Alert.alert(
+              AppAlert.alert(
                 tx('চ্যানেল মুছে ফেলা হয়েছে', 'Channel deleted'),
                 tx(`${result.audiobooks_kept}টি অডিওবুক প্রাইভেট হিসেবে রাখা হয়েছে।`, `${result.audiobooks_kept} audiobooks were kept as private.`),
               );
@@ -307,25 +374,47 @@ export function PublisherScreen() {
 
         {active && dashboard && myChannel ? (
           <>
-            <View style={styles.statsGrid}>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{formatMoney(dashboard.available_balance)}</Text>
-                <Text style={styles.statLabel}>{tx('উত্তোলনযোগ্য', 'Available')}</Text>
+            <View style={styles.earnings}>
+              <Text style={styles.earningsLabel}>{tx('উত্তোলনযোগ্য ব্যালান্স', 'Available balance')}</Text>
+              <Text style={styles.earningsValue}>{formatMoney(dashboard.available_balance)}</Text>
+              <View style={styles.earningsRow}>
+                <View style={styles.earningsItem}>
+                  <Text style={styles.earningsSmallValue}>{formatMoney(dashboard.this_month.estimated)}</Text>
+                  <Text style={styles.earningsSmallLabel}>{tx('এ মাসে (আনুমানিক)', 'This month (estimate)')}</Text>
+                </View>
+                <View style={styles.earningsItem}>
+                  <Text style={styles.earningsSmallValue}>{formatMoney(dashboard.lifetime_earned)}</Text>
+                  <Text style={styles.earningsSmallLabel}>{tx('মোট আয়', 'Total earned')}</Text>
+                </View>
+                <View style={styles.earningsItem}>
+                  <Text style={styles.earningsSmallValue}>{formatMoney(dashboard.withdrawn)}</Text>
+                  <Text style={styles.earningsSmallLabel}>{tx('তোলা হয়েছে', 'Paid out')}</Text>
+                </View>
               </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{dashboard.eligible_views}</Text>
-                <Text style={styles.statLabel}>{tx('এ মাসের যোগ্য শোনা', 'Eligible listens (month)')}</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{dashboard.audiobooks}</Text>
-                <Text style={styles.statLabel}>{tx('অডিওবুক', 'Audiobooks')}</Text>
-              </View>
+              {Number(dashboard.pending_withdrawals) > 0 ? (
+                <Text style={styles.earningsNote}>
+                  {tx(`${formatMoney(dashboard.pending_withdrawals)} উত্তোলনের অপেক্ষায়`, `${formatMoney(dashboard.pending_withdrawals)} waiting to be paid out`)}
+                </Text>
+              ) : null}
+              <Text style={styles.earningsNote}>
+                {tx(
+                  `এ মাসে আপনার ${dashboard.this_month.eligible_views}টি যোগ্য শোনা (সবার ${dashboard.this_month.all_eligible_views}টি)। মাস শেষে প্রিমিয়াম আয়ের ${dashboard.this_month.publisher_percent}% শোনার অনুপাতে ভাগ হয়।`,
+                  `${dashboard.this_month.eligible_views} of ${dashboard.this_month.all_eligible_views} eligible listens this month are yours. At month end, ${dashboard.this_month.publisher_percent}% of Premium income is shared by listens.`,
+                )}
+              </Text>
+              <AppButton label={tx('টাকা তোলার অনুরোধ', 'Request withdrawal')} icon="cash-outline" onPress={openWithdraw} />
             </View>
-            <AppButton
-              label={tx('টাকা তোলার অনুরোধ', 'Request withdrawal')}
-              onPress={() => setWithdrawSheet(true)}
-              disabled={Number(dashboard.available_balance) <= 0}
-            />
+
+            <FormCard style={styles.list}>
+              <ListRow
+                icon="stats-chart-outline"
+                title={tx('চ্যানেল অ্যানালিটিক্স', 'Channel analytics')}
+                subtitle={tx('ফলোয়ার, শোনার সময়, শ্রোতা ও রিপোর্ট', 'Followers, listening time, listeners and reports')}
+                value={tx(`${dashboard.followers} ফলোয়ার`, `${dashboard.followers} followers`)}
+                onPress={() => navigation.navigate('PublisherAnalytics')}
+                last
+              />
+            </FormCard>
 
             {myChannel ? (
               <FormCard style={styles.list}>
@@ -358,20 +447,45 @@ export function PublisherScreen() {
             ) : null}
 
             <FormCard style={styles.list}>
-              <Text style={styles.cardTitle}>{tx('আয় ও উত্তোলন', 'Earnings & withdrawals')}</Text>
-              {[...dashboard.ledger.map((l) => ({ id: l.id, title: l.kind === 'earning' ? tx(`আয় · ${l.month}`, `Earnings · ${l.month}`) : tx('উত্তোলন', 'Withdrawal'), amount: l.amount, badge: null as string | null })),
-                ...dashboard.withdrawals.filter((w) => w.status !== 'completed').map((w) => ({ id: w.id, title: tx('উত্তোলন অনুরোধ', 'Withdrawal request'), amount: `-${w.amount}`, badge: w.status }))]
-                .slice(0, 12)
-                .map((row, i, all) => (
-                  <View key={row.id} style={[styles.ledgerRow, i < all.length - 1 && styles.divider]}>
-                    <Text style={styles.ledgerTitle}>{row.title}</Text>
-                    {row.badge ? <TagBadge label={row.badge} variant="genre" /> : null}
-                    <Text style={[styles.ledgerAmount, row.amount.startsWith('-') && styles.negative]}>{formatMoney(row.amount.replace('-', ''))}</Text>
+              <Text style={styles.cardTitle}>{tx('উত্তোলনের অনুরোধ', 'Withdrawal requests')}</Text>
+              {dashboard.withdrawals.slice(0, 10).map((w, i, all) => (
+                <View key={w.id} style={[styles.ledgerBlock, i < all.length - 1 && styles.divider]}>
+                  <View style={styles.ledgerRow}>
+                    <Text style={styles.ledgerTitle} numberOfLines={1}>
+                      {w.destination}
+                    </Text>
+                    <Text style={styles.ledgerAmount}>{formatMoney(w.amount)}</Text>
                   </View>
-                ))}
-              {!dashboard.ledger.length && !dashboard.withdrawals.length ? (
+                  <View style={styles.ledgerRow}>
+                    <TagBadge label={withdrawalStatus(w.status)} variant={w.status === 'completed' ? 'free' : w.status === 'rejected' ? 'premium' : 'genre'} />
+                    <Text style={styles.ledgerMeta} numberOfLines={2}>
+                      {w.status === 'completed'
+                        ? tx(`পাঠানো হয়েছে ${formatDate(w.paid_at, false)} · রেফ: ${w.payout_reference ?? ''}`, `Sent ${formatDate(w.paid_at, true)} · Ref: ${w.payout_reference ?? ''}`)
+                        : w.status === 'approved' && w.scheduled_for
+                          ? tx(`${formatDate(w.scheduled_for, false)}-এর মধ্যে পাঠানো হবে`, `Will be sent by ${formatDate(w.scheduled_for, true)}`)
+                          : w.status === 'rejected'
+                            ? w.reason
+                            : tx(`জমা ${formatDate(w.created_at, false)}`, `Requested ${formatDate(w.created_at, true)}`)}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+              {!dashboard.withdrawals.length ? (
+                <Text style={styles.cardText}>{tx('এখনো কোনো উত্তোলনের অনুরোধ নেই।', 'No withdrawal requests yet.')}</Text>
+              ) : null}
+            </FormCard>
+
+            <FormCard style={styles.list}>
+              <Text style={styles.cardTitle}>{tx('মাসিক আয়', 'Monthly earnings')}</Text>
+              {dashboard.ledger.filter((l) => l.kind === 'earning').slice(0, 12).map((l, i, all) => (
+                <View key={l.id} style={[styles.ledgerRow, styles.ledgerBlock, i < all.length - 1 && styles.divider]}>
+                  <Text style={styles.ledgerTitle}>{l.month}</Text>
+                  <Text style={styles.ledgerAmount}>{formatMoney(l.amount)}</Text>
+                </View>
+              ))}
+              {!dashboard.ledger.some((l) => l.kind === 'earning') ? (
                 <Text style={styles.cardText}>
-                  {tx('মাস শেষে প্রিমিয়াম শোনার ভিত্তিতে আয় যোগ হয়।', 'Earnings are added at month close based on premium listens.')}
+                  {tx('প্রথম মাস শেষ হলে এখানে আয় দেখা যাবে।', 'Your earnings appear here once your first month closes.')}
                 </Text>
               ) : null}
             </FormCard>
@@ -387,18 +501,58 @@ export function PublisherScreen() {
       <ModalBottomSheet visible={withdrawSheet} onClose={() => setWithdrawSheet(false)}>
         <View style={styles.sheet}>
           <Text style={styles.cardTitle}>{tx('টাকা তোলার অনুরোধ', 'Request withdrawal')}</Text>
-          {dashboard ? (
-            <Text style={styles.cardText}>{tx(`উত্তোলনযোগ্য: ${formatMoney(dashboard.available_balance)}`, `Available: ${formatMoney(dashboard.available_balance)}`)}</Text>
-          ) : null}
-          <Field label={tx('পরিমাণ (৳)', 'Amount (BDT)')} required value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-          <Field
-            label={tx('গন্তব্য', 'Destination')}
-            required
-            value={destination}
-            onChangeText={setDestination}
-            placeholder={tx('যেমন: bKash 01XXXXXXXXX', 'e.g. bKash 01XXXXXXXXX')}
-            maxLength={150}
-          />
+          <SheetScrollView maxHeight={460}>
+            <View style={styles.sheetBody}>
+              {dashboard ? (
+                <Text style={styles.cardText}>
+                  {tx(`সর্বোচ্চ তোলা যাবে: ${formatMoney(dashboard.available_balance)}`, `You can withdraw up to ${formatMoney(dashboard.available_balance)}`)}
+                </Text>
+              ) : null}
+              <View style={styles.amountRow}>
+                <View style={styles.flex}>
+                  <Field label={tx('পরিমাণ (৳)', 'Amount (BDT)')} required value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+                </View>
+                <AppButton
+                  label={tx('সব', 'All')}
+                  variant="secondary"
+                  fullWidth={false}
+                  onPress={() => setAmount(String(Number(dashboard?.available_balance ?? 0)))}
+                />
+              </View>
+              <Text style={styles.fieldLabel}>{tx('কোথায় পাঠাবেন', 'Send to')}</Text>
+              <ChipGroup<PayoutMethod>
+                value={payoutMethod}
+                onChange={setPayoutMethod}
+                options={[
+                  { value: 'bkash', label: 'bKash' },
+                  { value: 'nagad', label: 'Nagad' },
+                  { value: 'rocket', label: 'Rocket' },
+                  { value: 'bank', label: tx('ব্যাংক', 'Bank') },
+                ]}
+              />
+              {payoutMethod === 'bank' ? (
+                <>
+                  <Field label={tx('ব্যাংকের নাম', 'Bank name')} required value={bankName} onChangeText={setBankName} maxLength={150} />
+                  <Field label={tx('অ্যাকাউন্টের নাম', 'Account holder name')} required value={accountName} onChangeText={setAccountName} maxLength={150} />
+                  <Field label={tx('অ্যাকাউন্ট নম্বর', 'Account number')} required value={accountNumber} onChangeText={setAccountNumber} keyboardType="number-pad" maxLength={50} />
+                  <Field label={tx('শাখা', 'Branch')} value={branch} onChangeText={setBranch} maxLength={150} />
+                </>
+              ) : (
+                <>
+                  <Field
+                    label={tx('মোবাইল নম্বর', 'Mobile number')}
+                    required
+                    value={accountNumber}
+                    onChangeText={setAccountNumber}
+                    keyboardType="phone-pad"
+                    placeholder="01XXXXXXXXX"
+                    maxLength={11}
+                  />
+                  <Field label={tx('অ্যাকাউন্টের নাম (ঐচ্ছিক)', 'Account name (optional)')} value={accountName} onChangeText={setAccountName} maxLength={150} />
+                </>
+              )}
+            </View>
+          </SheetScrollView>
           <AppButton label={tx('অনুরোধ পাঠান', 'Send request')} onPress={withdraw} isLoading={busy === 'withdraw'} />
         </View>
       </ModalBottomSheet>
@@ -440,6 +594,74 @@ const styles = StyleSheet.create({
     fontSize: FontSizes.sm,
     color: Colors.textPrimary,
     lineHeight: 20,
+  },
+  earnings: {
+    backgroundColor: Colors.surfaceDark,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  earningsLabel: {
+    fontSize: FontSizes.sm,
+    color: 'rgba(255,255,255,0.75)',
+    fontWeight: '600',
+  },
+  earningsValue: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  earningsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  earningsItem: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: Radius.md,
+    padding: Spacing.sm,
+    gap: 2,
+  },
+  earningsSmallValue: {
+    fontSize: FontSizes.base,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  earningsSmallLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  earningsNote: {
+    fontSize: FontSizes.xs,
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 17,
+  },
+  ledgerBlock: {
+    paddingVertical: Spacing.sm,
+    gap: 6,
+  },
+  ledgerMeta: {
+    flex: 1,
+    fontSize: FontSizes.xs,
+    color: Colors.textSecondary,
+    textAlign: 'right',
+  },
+  sheetBody: {
+    gap: Spacing.md,
+    paddingBottom: Spacing.sm,
+  },
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: Spacing.sm,
+  },
+  flex: {
+    flex: 1,
+  },
+  fieldLabel: {
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    color: Colors.textPrimary,
   },
   steps: {
     flexDirection: 'row',

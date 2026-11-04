@@ -20,6 +20,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models import User
 from app.models.notification import Notification, PushToken
 
 log = logging.getLogger(__name__)
@@ -69,18 +70,69 @@ def notify(
     kind: str,
     title: str,
     body: str,
+    *,
+    en: Optional[tuple[str, str]] = None,
     **data: Any,
 ) -> Notification:
-    """Stage a notification in the current transaction. Call `deliver()` after commit."""
+    """Stage a notification in the current transaction. Call `deliver()` after commit.
+
+    `title`/`body` are Bangla; `en` is the (title, body) English copy, kept in
+    data as title_en/body_en so the app can show the user's language."""
+    values = {key: str(value) for key, value in data.items()}
+    if en:
+        values["title_en"], values["body_en"] = en
     row = Notification(
         user_id=user_id,
         kind=kind,
         title=title,
         body=body,
-        data={key: str(value) for key, value in data.items()},
+        data=values,
     )
     db.add(row)
     return row
+
+
+def android_channel(kind: str) -> str:
+    """Android notification channel (created by the app) for a notification kind."""
+    if kind.startswith(("channel.", "generation.")):
+        return "audiobooks"
+    if kind.startswith(("payment.", "publisher.", "withdrawal.")):
+        return "account"
+    if kind.startswith("moderation."):
+        return "moderation"
+    return "default"
+
+
+def push_image(n: Notification) -> Optional[str]:
+    """Absolute cover URL for a big-picture notification, when the API has a public address."""
+    image = (n.data or {}).get("image")
+    if not image or not settings.PUBLIC_API_BASE_URL:
+        return None
+    return image if image.startswith("http") else settings.PUBLIC_API_BASE_URL.rstrip("/") + image
+
+
+def message_for(n: Notification, token: str, english: bool) -> dict[str, Any]:
+    title, body = localized(n, english)
+    message: dict[str, Any] = {
+        "to": token,
+        "title": title,
+        "body": push_body(body),
+        "sound": "default",
+        "channelId": android_channel(n.kind),
+        "priority": "high",
+        "data": {**n.data, "notification_id": str(n.id), "kind": n.kind},
+    }
+    image = push_image(n)
+    if image:
+        message["richContent"] = {"image": image}
+    return message
+
+
+def localized(n: Notification, english: bool) -> tuple[str, str]:
+    data = n.data or {}
+    if english and data.get("title_en"):
+        return data["title_en"], data.get("body_en", "")
+    return n.title, n.body
 
 
 PUSH_BODY_CHARS = 160
@@ -102,20 +154,13 @@ async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notificatio
     user_ids = {n.user_id for n in rows}
     tokens = (await db.execute(select(PushToken.user_id, PushToken.token)
                                .where(PushToken.user_id.in_(user_ids)))).all()
+    english = set((await db.scalars(select(User.id).where(User.id.in_(user_ids), User.language == "en"))).all())
     by_user: dict[uuid.UUID, list[str]] = {}
     for user_id, token in tokens:
         by_user.setdefault(user_id, []).append(token)
 
     messages = [
-        {
-            "to": token,
-            "title": n.title,
-            "body": push_body(n.body),
-            "sound": "default",
-            "channelId": "default",
-            "priority": "high",
-            "data": {**n.data, "notification_id": str(n.id), "kind": n.kind},
-        }
+        message_for(n, token, n.user_id in english)
         for n in rows
         for token in by_user.get(n.user_id, [])
     ]
@@ -127,8 +172,9 @@ async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notificatio
         await db.commit()
 
 
-async def notify_and_deliver(db: AsyncSession, user_id: uuid.UUID, kind: str, title: str, body: str, **data: Any) -> None:
+async def notify_and_deliver(db: AsyncSession, user_id: uuid.UUID, kind: str, title: str, body: str,
+                             *, en: Optional[tuple[str, str]] = None, **data: Any) -> None:
     """Convenience for code paths that own their transaction (workers, scripts)."""
-    row = notify(db, user_id, kind, title, body, **data)
+    row = notify(db, user_id, kind, title, body, en=en, **data)
     await db.commit()
     await deliver(db, [row])

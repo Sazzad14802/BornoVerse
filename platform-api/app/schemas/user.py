@@ -26,3 +26,5 @@ class UserRead(UserBase):
     full_name: str | None = None
     premium_until: datetime | None = None
     subscription_cancelled: bool = False
+    avatar_url: str | None = None
+    language: str = "bn"

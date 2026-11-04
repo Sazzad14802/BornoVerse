@@ -5,7 +5,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,10 +99,10 @@ export function PaymentDetailsScreen() {
           dialogTitle: `${inv.invoice_number}.pdf`,
         });
       } else {
-        Alert.alert(tx('ইনভয়েস তৈরি হয়েছে', 'Invoice created'), uri);
+        AppAlert.alert(tx('ইনভয়েস তৈরি হয়েছে', 'Invoice created'), uri);
       }
     } catch (error) {
-      Alert.alert(tx('ইনভয়েস তৈরি হয়নি', 'Could not create the invoice'), errorMessage(error));
+      AppAlert.alert(tx('ইনভয়েস তৈরি হয়নি', 'Could not create the invoice'), errorMessage(error));
     } finally {
       setSaving(false);
     }

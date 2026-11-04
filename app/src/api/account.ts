@@ -5,21 +5,25 @@
 
 import { apiClient } from './client';
 import { User } from '../types/auth';
-import {
-  Channel,
-  OrderKind,
-  PaymentOrder,
-  Plan,
-  PublicChannel,
-  PublisherApplication,
-  PublisherDashboard,
-  Withdrawal,
-} from '../types/domain';
+import { Channel, OrderKind, PaymentOrder, Plan, PublicChannel, PublisherApplication, PublisherDashboard, Withdrawal, PayoutDetails } from '../types/domain';
 import { PickedFile, toFormData } from './upload';
 
 export const profileApi = {
   update(fullName: string): Promise<User> {
     return apiClient.patch<User>('/users/me', { full_name: fullName });
+  },
+
+  /** App language for push notifications. */
+  setLanguage(language: 'bn' | 'en'): Promise<User> {
+    return apiClient.patch<User>('/users/me', { language });
+  },
+
+  uploadAvatar(file: PickedFile): Promise<User> {
+    return apiClient.uploadFile<User>('/users/me/avatar', toFormData(file, 'image/jpeg'));
+  },
+
+  removeAvatar(): Promise<User> {
+    return apiClient.delete<User>('/users/me/avatar');
   },
 
   /** Permanently deletes the account and everything in it. */
@@ -28,12 +32,13 @@ export const profileApi = {
   },
 };
 
-/** The active plan and which plans count as an upgrade. */
+/** The active plan, and whether a plan can be bought now (no Premium, or its last day). */
 export interface CurrentSubscription {
   plan: { id: string | null; name: string; months: number } | null;
   premium_until: string | null;
-  upgrade_plan_ids: string[];
-  is_highest: boolean;
+  can_buy: boolean;
+  /** When renewing opens (one day before expiry), while it is still closed. */
+  renew_from: string | null;
 }
 
 /** Details of a completed payment, for the receipt and the invoice PDF. */
@@ -101,6 +106,22 @@ export const paymentsApi = {
   },
 };
 
+export interface PublisherAnalytics {
+  days: number;
+  channel: { id: string; name: string } | null;
+  followers: number;
+  new_followers: number;
+  listen_seconds: number;
+  plays: number;
+  distinct_listeners: number;
+  all_time_listeners: number;
+  eligible_views: number;
+  audiobooks: number;
+  reports: { total: number; open: number; action_taken: number; dismissed: number };
+  daily: { date: string; followers: number; listen_seconds: number; listeners: number }[];
+  top_audiobooks: { id: string; title: string; listen_seconds: number }[];
+}
+
 export const publisherApi = {
   applications(): Promise<PublisherApplication[]> {
     return apiClient.get<PublisherApplication[]>('/publisher/applications');
@@ -124,6 +145,14 @@ export const publisherApi = {
     return apiClient.post<Channel>('/publisher/channels', { name, description });
   },
 
+  uploadChannelAvatar(id: string, file: PickedFile): Promise<Channel> {
+    return apiClient.uploadFile<Channel>(`/publisher/channels/${id}/avatar`, toFormData(file, 'image/jpeg'));
+  },
+
+  removeChannelAvatar(id: string): Promise<Channel> {
+    return apiClient.delete<Channel>(`/publisher/channels/${id}/avatar`);
+  },
+
   /** Deletes the channel; its audiobooks stay in My audiobooks as private. */
   deleteChannel(id: string): Promise<{ deleted: boolean; audiobooks_kept: number }> {
     return apiClient.delete(`/publisher/channels/${id}`);
@@ -137,8 +166,12 @@ export const publisherApi = {
     return apiClient.get<PublisherDashboard>('/publisher/dashboard');
   },
 
-  requestWithdrawal(amount: string, destination: string): Promise<Withdrawal> {
-    return apiClient.post<Withdrawal>('/publisher/withdrawals', { amount, destination });
+  requestWithdrawal(amount: string, payout: PayoutDetails): Promise<Withdrawal> {
+    return apiClient.post<Withdrawal>('/publisher/withdrawals', { amount, ...payout });
+  },
+
+  analytics(days = 30): Promise<PublisherAnalytics> {
+    return apiClient.get<PublisherAnalytics>(`/publisher/analytics?days=${days}`);
   },
 };
 

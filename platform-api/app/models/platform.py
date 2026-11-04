@@ -16,6 +16,8 @@ class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(150))
     description: Mapped[str] = mapped_column(Text, default="")
     moderated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The channel picture, e.g. the publisher's logo.
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512))
 
 class PublisherApplication(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "publisher_applications"
@@ -138,6 +140,17 @@ class Withdrawal(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     destination: Mapped[str] = mapped_column(String(150))
     reason: Mapped[str] = mapped_column(Text, default="")
+    # Where to send the money: bkash / nagad / rocket (mobile number) or bank.
+    method: Mapped[str] = mapped_column(String(20), default="other")
+    account_name: Mapped[str] = mapped_column(String(150), default="")
+    account_number: Mapped[str] = mapped_column(String(50), default="")
+    bank_name: Mapped[str] = mapped_column(String(150), default="")
+    branch: Mapped[str] = mapped_column(String(150), default="")
+    # The admin's record of the manual payout.
+    scheduled_for: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    payout_reference: Mapped[str] = mapped_column(String(150), default="")
+    payout_note: Mapped[str] = mapped_column(Text, default="")
 
 class Playlist(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "playlists"

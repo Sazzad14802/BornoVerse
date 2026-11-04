@@ -17,7 +17,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useResource } from '../../hooks/useResource';
 import { useAppNavigation } from '../../navigation/useAppNavigation';
 import { formatDate } from '../../utils/format';
-import { APPEAL_REASONS } from './AccountStatusScreen';
+import { APPEAL_REASONS, violationName } from './AccountStatusScreen';
 import { Colors, FontSizes, Radius, Spacing } from '../../theme';
 
 type Tab = 'running' | 'past';
@@ -98,9 +98,9 @@ export function AppealsScreen() {
                   </View>
                 </View>
 
-                {a.violation_label ? (
+                {a.violation ? (
                   <Text style={styles.meta}>
-                    {tx('লঙ্ঘন', 'Violation')}: {a.violation_label}
+                    {tx('লঙ্ঘন', 'Violation')}: {violationName(a.violation, isEnglish)}
                   </Text>
                 ) : null}
                 <Text style={styles.meta}>

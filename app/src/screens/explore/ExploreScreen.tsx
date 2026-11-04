@@ -4,7 +4,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
@@ -55,7 +56,7 @@ export function ExploreScreen() {
       setExtra((current) => [...current, ...next.items]);
       setPage(page + 1);
     } catch (error) {
-      Alert.alert(tx('লোড করা যায়নি', 'Could not load more'), errorMessage(error));
+      AppAlert.alert(tx('লোড করা যায়নি', 'Could not load more'), errorMessage(error));
     } finally {
       setLoadingMore(false);
     }
@@ -66,7 +67,7 @@ export function ExploreScreen() {
       await loadAudiobook(book);
       navigation.navigate('Player', { audiobookId: book.id });
     } catch (error) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
     }
   };
 

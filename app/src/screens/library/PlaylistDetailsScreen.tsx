@@ -3,7 +3,8 @@
  */
 
 import React from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -26,7 +27,7 @@ export function PlaylistDetailsScreen() {
   const books = useResource(() => playlistsApi.books(playlistId), [playlistId]);
 
   const removeBook = (book: Audiobook) =>
-    Alert.alert(book.title, tx('প্লেলিস্ট থেকে সরাবেন?', 'Remove from this playlist?'), [
+    AppAlert.alert(book.title, tx('প্লেলিস্ট থেকে সরাবেন?', 'Remove from this playlist?'), [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       {
         text: tx('সরান', 'Remove'),
@@ -36,14 +37,14 @@ export function PlaylistDetailsScreen() {
             await playlistsApi.removeBook(playlistId, book.id);
             books.setData((current) => (current ?? []).filter((b) => b.id !== book.id));
           } catch (error) {
-            Alert.alert(tx('ত্রুটি', 'Error'), errorMessage(error));
+            AppAlert.alert(tx('ত্রুটি', 'Error'), errorMessage(error));
           }
         },
       },
     ]);
 
   const deletePlaylist = () =>
-    Alert.alert(name, tx('পুরো প্লেলিস্টটি মুছবেন?', 'Delete this playlist?'), [
+    AppAlert.alert(name, tx('পুরো প্লেলিস্টটি মুছবেন?', 'Delete this playlist?'), [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       {
         text: tx('মুছুন', 'Delete'),
@@ -53,7 +54,7 @@ export function PlaylistDetailsScreen() {
             await playlistsApi.remove(playlistId);
             navigation.goBack();
           } catch (error) {
-            Alert.alert(tx('ত্রুটি', 'Error'), errorMessage(error));
+            AppAlert.alert(tx('ত্রুটি', 'Error'), errorMessage(error));
           }
         },
       },

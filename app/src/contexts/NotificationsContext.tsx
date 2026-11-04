@@ -48,13 +48,22 @@ const NotificationsContext = createContext<NotificationsContextValue | null>(nul
 const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 const remotePushSupported = Device.isDevice && Platform.OS !== 'web' && !(isExpoGo && Platform.OS === 'android');
 
+/** Android channels the server targets by kind; each can be muted separately in system settings. */
+const ANDROID_CHANNELS: { id: string; name: string; description: string }[] = [
+  { id: 'audiobooks', name: 'Audiobooks', description: 'New audiobooks from channels you follow, and finished generations' },
+  { id: 'account', name: 'Account & payments', description: 'Payments, Premium, publisher account and withdrawals' },
+  { id: 'moderation', name: 'Moderation', description: 'Notices about your content and appeal decisions' },
+  { id: 'default', name: 'General', description: 'Other BornoVerse updates' },
+];
+
 async function ensureAndroidChannel() {
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'BornoVerse',
-      description: 'New audiobooks, generation updates, payments and account notices',
+  if (Platform.OS !== 'android') return;
+  for (const channel of ANDROID_CHANNELS) {
+    await Notifications.setNotificationChannelAsync(channel.id, {
+      name: channel.name,
+      description: channel.description,
       importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 200, 120, 200],
+      vibrationPattern: [0, 180, 100, 180],
       lightColor: '#0C7F5F',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       showBadge: true,

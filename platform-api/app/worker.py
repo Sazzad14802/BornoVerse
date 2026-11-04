@@ -99,7 +99,8 @@ async def process(id, token):
                 job.lease_token = None
                 notice = notify(db, job.owner_id, "generation.completed",
                                 "অডিওবুক প্রস্তুত", f"«{book.title}» শোনার জন্য প্রস্তুত।",
-                                audiobook_id=book.id, job_id=job.id)
+                                en=("Audiobook ready", f"“{book.title}” is ready to listen."),
+                                image=book.cover_image_url or "", audiobook_id=book.id, job_id=job.id)
                 # A book created public in a channel goes live now: tell bell followers.
                 await db.flush()
                 followers = await announce(db, book)
@@ -123,6 +124,7 @@ async def process(id, token):
                 if job.status == AudiobookStatus.FAILED:
                     notice = notify(db, job.owner_id, "generation.failed",
                                     "অডিওবুক তৈরি ব্যর্থ", f"«{book.title}» তৈরি করা যায়নি। আবার চেষ্টা করুন।",
+                                    en=("Audiobook generation failed", f"“{book.title}” could not be generated. Please try again."),
                                     audiobook_id=book.id, job_id=job.id)
                 await db.commit()
                 await deliver(db, [notice])
@@ -132,10 +134,28 @@ async def process(id, token):
             pending.cancel()
         await asyncio.gather(heartbeat, *([pending] if pending else []), return_exceptions=True)
 
+async def maintenance():
+    """Every 15 minutes: close finished months (publisher earnings) and send Premium reminders."""
+    from app.services import billing
+    try:
+        async with async_session_maker() as db:
+            closed = await billing.close_due_months(db)
+            if closed:
+                log.info("Closed months: %s", ", ".join(closed))
+        async with async_session_maker() as db:
+            await billing.premium_reminders(db)
+    except Exception:
+        log.exception("Maintenance failed")
+
+
 async def main():
     if not settings.TTS_SERVICE_KEY:
         raise RuntimeError("TTS_SERVICE_KEY is required")
+    last_maintenance = 0.0
     while True:
+        if asyncio.get_running_loop().time() - last_maintenance > 900:
+            last_maintenance = asyncio.get_running_loop().time()
+            await maintenance()
         async with async_session_maker() as db:
             lease = await claim(db)
         if lease:

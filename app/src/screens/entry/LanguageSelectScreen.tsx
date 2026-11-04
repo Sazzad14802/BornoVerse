@@ -61,19 +61,6 @@ export function LanguageSelectScreen({ onBack, onContinue }: LanguageSelectScree
           : 'ইংরেজি ইন্টারফেস',
       styleType: 'neutral',
     },
-    {
-      id: 'mixed' as const,
-      title: 'বাংলা + English',
-      subtitle:
-        language === 'mixed'
-          ? isEnglish
-            ? 'Mixed UI · Active'
-            : 'মিশ্র UI · সক্রিয়'
-          : isEnglish
-          ? 'Bilingual labels'
-          : 'মিশ্র ইন্টারফেস',
-      styleType: 'blue',
-    },
   ];
 
   return (

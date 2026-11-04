@@ -17,6 +17,10 @@ export interface User {
   username: string;
   email: string;
   full_name: string | null;
+  /** Profile picture URL. */
+  avatar_url?: string | null;
+  /** App language used for push notifications. */
+  language?: 'bn' | 'en';
   created_at: string;
   updated_at: string;
 }

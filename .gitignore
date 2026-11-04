@@ -101,3 +101,9 @@ uploads/
 
 # Firebase config (per-developer)
 google-services.json
+
+# ── Local editor / assistant settings (never committed) ─────────────────────
+.claude/
+CLAUDE.md
+.cursor/
+.vscode/

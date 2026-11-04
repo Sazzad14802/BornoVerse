@@ -22,6 +22,7 @@ export interface Channel {
   name: string;
   description: string;
   moderated: boolean;
+  avatar_url?: string | null;
 }
 
 export interface PublicChannel {
@@ -69,6 +70,8 @@ export interface LedgerEntry {
   created_at: string;
 }
 
+export type PayoutMethod = 'bkash' | 'nagad' | 'rocket' | 'bank';
+
 export interface Withdrawal {
   id: string;
   amount: string;
@@ -76,10 +79,30 @@ export interface Withdrawal {
   status: 'pending' | 'approved' | 'rejected' | 'completed';
   reason: string;
   created_at: string;
+  method?: PayoutMethod | 'other';
+  /** Set by the admin: when the money will be sent, and the payout record. */
+  scheduled_for?: string | null;
+  paid_at?: string | null;
+  payout_reference?: string;
+  payout_note?: string;
+}
+
+export interface PayoutDetails {
+  method: PayoutMethod;
+  account_name: string;
+  account_number: string;
+  bank_name: string;
+  branch: string;
 }
 
 export interface PublisherDashboard {
   available_balance: string;
+  lifetime_earned: string;
+  withdrawn: string;
+  pending_withdrawals: string;
+  /** This month so far, split the way the month close will split it. */
+  this_month: { month: string; estimated: string; eligible_views: number; all_eligible_views: number; publisher_percent: number };
+  followers: number;
   eligible_views: number;
   audiobooks: number;
   ledger: LedgerEntry[];

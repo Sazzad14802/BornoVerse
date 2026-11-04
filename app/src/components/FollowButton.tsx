@@ -7,7 +7,8 @@
  */
 
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from './AppAlert';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ChannelProfile, socialApi } from '../api/social';
 import { errorMessage } from '../api/client';
@@ -33,14 +34,14 @@ export function FollowButton({ channel, onChange, compact, pill }: FollowButtonP
     try {
       onChange(await action());
     } catch (error) {
-      Alert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
+      AppAlert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
     } finally {
       setBusy(false);
     }
   };
 
   const unfollow = () =>
-    Alert.alert(channel.name, tx('আনফলো করবেন?', 'Unfollow this channel?'), [
+    AppAlert.alert(channel.name, tx('আনফলো করবেন?', 'Unfollow this channel?'), [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       { text: tx('আনফলো', 'Unfollow'), style: 'destructive', onPress: () => run(() => socialApi.unfollow(channel.id)) },
     ]);

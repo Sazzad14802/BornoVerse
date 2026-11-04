@@ -80,6 +80,7 @@ async def channel_profile(db, channel: Channel, user) -> dict:
     owner = await db.get(User, channel.owner_id)
     return {
         "id": str(channel.id), "name": channel.name, "description": channel.description,
+        "avatar_url": channel.avatar_url,
         "publisher_name": owner.full_name or owner.username,
         "followers": await db.scalar(select(func.count()).select_from(ChannelFollow).where(ChannelFollow.channel_id == channel.id)),
         "audiobooks": await db.scalar(select(func.count()).select_from(Audiobook).where(Audiobook.channel_id == channel.id, public_conditions())),
@@ -100,7 +101,8 @@ async def list_channels(db: DatabaseDep, user: MemberDep, q: str = ""):
         query = query.where(Channel.name.ilike(f"%{q.strip()}%"))
     rows = (await db.scalars(query.order_by(Channel.name).limit(200))).all()
     rows = sorted(rows, key=lambda c: -counts.get(c.id, 0))
-    return [{"id": str(c.id), "name": c.name, "description": c.description, "followers": counts.get(c.id, 0),
+    return [{"id": str(c.id), "name": c.name, "description": c.description, "avatar_url": c.avatar_url,
+             "followers": counts.get(c.id, 0),
              "following": c.id in follows, "notify": bool(follows.get(c.id)), "is_owner": c.owner_id == user.id}
             for c in rows]
 
@@ -151,7 +153,7 @@ async def following(db: DatabaseDep, user: MemberDep):
     rows = (await db.execute(visible_channel().add_columns(ChannelFollow.notify).join(
         ChannelFollow, ChannelFollow.channel_id == Channel.id).where(ChannelFollow.user_id == user.id)
         .order_by(ChannelFollow.created_at.desc()))).all()
-    return [{"id": str(c.id), "name": c.name, "notify": notify} for c, notify in rows]
+    return [{"id": str(c.id), "name": c.name, "avatar_url": c.avatar_url, "notify": notify} for c, notify in rows]
 
 
 @router.get("/me/feed")

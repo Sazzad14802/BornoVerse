@@ -21,6 +21,8 @@ export function openNotificationTarget(data: Record<string, unknown> | undefined
       screen: kind === 'generation.completed' ? 'Player' : 'GenerationStatus',
       params: { audiobookId },
     } as any);
+  } else if (kind.startsWith('premium.')) {
+    navigationRef.navigate('ProfileTab', { screen: 'Subscription' } as any);
   } else if (kind.startsWith('payment.')) {
     navigationRef.navigate('ProfileTab', { screen: 'Profile' } as any);
   } else if (kind.startsWith('publisher.') || kind.startsWith('withdrawal.')) {

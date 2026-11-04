@@ -17,6 +17,7 @@ export interface Favourites {
 export interface ChannelSummary {
   id: string;
   name: string;
+  avatar_url?: string | null;
   description?: string;
   followers: number;
   following: boolean;
@@ -34,6 +35,7 @@ export interface ChannelPlaylist {
 export interface ChannelProfile {
   id: string;
   name: string;
+  avatar_url?: string | null;
   description: string;
   publisher_name: string;
   followers: number;

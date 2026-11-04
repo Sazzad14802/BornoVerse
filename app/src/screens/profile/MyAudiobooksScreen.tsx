@@ -5,7 +5,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ModalBottomSheet } from '../../components/ModalBottomSheet';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -39,12 +40,12 @@ export function MyAudiobooksScreen() {
     try {
       replace(await audiobooksApi.setVisibility(book.id, book.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC'));
     } catch (error) {
-      Alert.alert(tx('পরিবর্তন হয়নি', 'Not changed'), errorMessage(error));
+      AppAlert.alert(tx('পরিবর্তন হয়নি', 'Not changed'), errorMessage(error));
     }
   };
 
   const remove = (book: Audiobook) =>
-    Alert.alert(book.title, tx('এই অডিওবুকটি মুছবেন?', 'Delete this audiobook?'), [
+    AppAlert.alert(book.title, tx('এই অডিওবুকটি মুছবেন?', 'Delete this audiobook?'), [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       {
         text: tx('মুছুন', 'Delete'),
@@ -54,7 +55,7 @@ export function MyAudiobooksScreen() {
             await audiobooksApi.delete(book.id);
             books.setData((current) => (current ?? []).filter((b) => b.id !== book.id));
           } catch (error) {
-            Alert.alert(tx('মুছা যায়নি', 'Could not delete'), errorMessage(error));
+            AppAlert.alert(tx('মুছা যায়নি', 'Could not delete'), errorMessage(error));
           }
         },
       },
@@ -65,7 +66,7 @@ export function MyAudiobooksScreen() {
       await loadAudiobook(book);
       navigation.navigate('Player', { audiobookId: book.id });
     } catch (error) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
     }
   };
 

@@ -57,6 +57,9 @@ services:
         sync: false
       - key: MAIL_FROM
         sync: false
+      # Public address of the API (absolute cover URLs in push notifications).
+      - key: PUBLIC_API_BASE_URL
+        value: https://bornoverse-api.onrender.com
       # Sign-up email codes. Needs BREVO_API_KEY + MAIL_FROM; set "false" until they are set.
       - key: REQUIRE_EMAIL_VERIFICATION
         value: "true"

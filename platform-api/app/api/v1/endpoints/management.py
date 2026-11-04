@@ -1,5 +1,6 @@
 """Administrative operations use a dedicated, database-verified role dependency."""
 import re
+from datetime import datetime, timezone
 from uuid import UUID
 from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Query
@@ -9,7 +10,7 @@ from app.api.deps import DatabaseDep, AdminDep
 from app.models import User, Audiobook, GenerationJob
 from app.models.platform import (Channel, PublisherApplication, Setting, Plan, Order, Audit,
     Report, Withdrawal, FinancialSnapshot, Ledger, PaymentEvent)
-from app.schemas.platform import Decision, PlanInput, PolicyInput, AdjustmentInput
+from app.schemas.platform import Decision, PlanInput, PolicyInput, AdjustmentInput, WithdrawalDecision
 from app.models.platform import FinancialAdjustment
 from app.models.moderation import ContentAppeal
 from app.schemas.user import UserRead
@@ -113,10 +114,11 @@ async def application_decision(id: UUID, data: Decision, db: DatabaseDep, admin:
     audit(db, admin, "application." + data.action, id, reason=data.reason)
     if data.action == "approve":
         notice = notify(db, user.id, "publisher.approved", "প্রকাশক আবেদন অনুমোদিত",
-                        "নিবন্ধন ফি পরিশোধ করে আপনার প্রকাশক অ্যাকাউন্ট চালু করুন।")
+                        "নিবন্ধন ফি পরিশোধ করে আপনার প্রকাশক অ্যাকাউন্ট চালু করুন।",
+                        en=("Publisher application approved", "Pay the registration fee to activate your publisher account."))
     else:
         notice = notify(db, user.id, "publisher.rejected", "প্রকাশক আবেদন বাতিল হয়েছে",
-                        f"কারণ: {data.reason}")
+                        f"কারণ: {data.reason}", en=("Publisher application rejected", f"Reason: {data.reason}"))
     await db.commit()
     await deliver(db, [notice])
     return record(row)
@@ -151,8 +153,10 @@ async def moderate(kind: str, id: UUID, data: Decision, db: DatabaseDep, admin: 
     owner_id = row.owner_id
     label = getattr(row, "title", None) or getattr(row, "name", "")
     body = f"«{label}»" + (f"। কারণ: {data.reason}" if data.reason else "")
+    body_en = f"“{label}”" + (f". Reason: {data.reason}" if data.reason else "")
     notice = notify(db, owner_id, f"moderation.{data.action}",
-                    "কনটেন্ট সীমিত করা হয়েছে" if data.action == "restrict" else "কনটেন্ট পুনরায় চালু হয়েছে", body)
+                    "কনটেন্ট সীমিত করা হয়েছে" if data.action == "restrict" else "কনটেন্ট পুনরায় চালু হয়েছে", body,
+                    en=("Content restricted" if data.action == "restrict" else "Content restored", body_en))
     await db.commit()
     await deliver(db, [notice])
     return record(row)
@@ -278,7 +282,7 @@ async def withdrawals(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=
     return await with_member_numbers(db, rows, "publisher_id")
 
 @router.post("/withdrawals/{id}/decision")
-async def withdrawal_decision(id: UUID, data: Decision, db: DatabaseDep, admin: AdminDep):
+async def withdrawal_decision(id: UUID, data: WithdrawalDecision, db: DatabaseDep, admin: AdminDep):
     row = await db.scalar(select(Withdrawal).where(Withdrawal.id == id).with_for_update())
     if not row:
         raise HTTPException(404, "Withdrawal not found")
@@ -287,14 +291,27 @@ async def withdrawal_decision(id: UUID, data: Decision, db: DatabaseDep, admin: 
     if not target:
         raise HTTPException(409, "Invalid withdrawal transition")
     row.status, row.reason = target, data.reason
+    if target == "approved":
+        row.scheduled_for = data.scheduled_for
     if target == "completed":
+        row.payout_reference = data.payout_reference.strip()
+        row.paid_at = data.paid_at or datetime.now(timezone.utc)
+        row.payout_note = data.payout_note.strip()
         # Internal simulated ledger settlement only. No external transfer is made.
         db.add(Ledger(publisher_id=row.publisher_id, month=month_now(), amount=-row.amount,
                       kind="withdrawal", reference=f"withdrawal:{row.id}"))
     audit(db, admin, "withdrawal." + data.action, id, reason=data.reason, simulated=True)
     titles = {"approved": "উত্তোলন অনুমোদিত", "rejected": "উত্তোলন বাতিল", "completed": "উত্তোলন সম্পন্ন"}
     body = f"৳{row.amount}" + (f"। কারণ: {data.reason}" if target == "rejected" and data.reason else "")
-    notice = notify(db, row.publisher_id, f"withdrawal.{target}", titles[target], body)
+    titles_en = {"approved": "Withdrawal approved", "rejected": "Withdrawal rejected", "completed": "Withdrawal completed"}
+    body_en = f"BDT {row.amount}" + (f". Reason: {data.reason}" if target == "rejected" and data.reason else "")
+    if target == "approved" and row.scheduled_for:
+        body += f"। {row.scheduled_for:%d %b %Y}-এর মধ্যে পাঠানো হবে।"
+        body_en += f" will be sent by {row.scheduled_for:%d %b %Y}."
+    if target == "completed":
+        body += f" {row.destination}-এ পাঠানো হয়েছে। রেফারেন্স: {row.payout_reference}"
+        body_en += f" was sent to {row.destination}. Reference: {row.payout_reference}"
+    notice = notify(db, row.publisher_id, f"withdrawal.{target}", titles[target], body, en=(titles_en[target], body_en))
     await db.commit()
     await deliver(db, [notice])
     return record(row)

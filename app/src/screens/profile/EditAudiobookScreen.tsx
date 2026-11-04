@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -81,7 +82,7 @@ export function EditAudiobookScreen() {
       const updated = await audiobooksApi.uploadCover(loaded.id, picked);
       setCoverUri(updated.cover_image_url);
     } catch (error) {
-      Alert.alert(tx('কভার', 'Cover'), errorMessage(error));
+      AppAlert.alert(tx('কভার', 'Cover'), errorMessage(error));
     } finally {
       setUploadingCover(false);
     }
@@ -89,7 +90,7 @@ export function EditAudiobookScreen() {
 
   const save = async () => {
     if (!title.trim()) {
-      Alert.alert(tx('শিরোনাম দিন', 'Enter a title'));
+      AppAlert.alert(tx('শিরোনাম দিন', 'Enter a title'));
       return;
     }
     setSaving(true);
@@ -103,7 +104,7 @@ export function EditAudiobookScreen() {
       });
       navigation.goBack();
     } catch (error) {
-      Alert.alert(tx('সংরক্ষণ হয়নি', 'Not saved'), errorMessage(error));
+      AppAlert.alert(tx('সংরক্ষণ হয়নি', 'Not saved'), errorMessage(error));
     } finally {
       setSaving(false);
     }

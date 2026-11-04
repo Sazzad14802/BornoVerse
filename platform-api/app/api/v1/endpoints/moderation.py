@@ -443,14 +443,19 @@ async def decide_appeal(appeal_id: UUID, data: AppealDecision, db: DatabaseDep, 
         mod.set_status(db, admin, report, "resolved", data.note, outcome="appeal_accepted")
         body = (f"«{book.title if book else ''}» নিয়ে আপনার আপিল গৃহীত হয়েছে। "
                 "এই সিদ্ধান্তের কারণে নেওয়া সব ব্যবস্থা তুলে নেওয়া হয়েছে।")
+        body_en = (f"Your appeal about “{book.title if book else ''}” was accepted. "
+                   "Every action taken because of this decision has been lifted.")
         if data.note:
             body += f"\n\nমডারেটরের বার্তা: {data.note}"
+            body_en += f"\n\nModerator's message: {data.note}"
         notice = notify(db, row.user_id, "moderation.appeal_accepted", "আপিল গৃহীত হয়েছে", body,
-                        report_id=str(report.id), audiobook_id=str(report.audiobook_id))
+                        en=("Appeal accepted", body_en), report_id=str(report.id), audiobook_id=str(report.audiobook_id))
     else:
         notice = await mod.confirm_violation(db, admin, report, delete_content=data.delete_content, note=data.note.strip())
         notice.title = "আপিল প্রত্যাখ্যাত হয়েছে"
         notice.body = f"{notice.body}\n\nকারণ: {data.note.strip()}"
+        notice.data = {**notice.data, "title_en": "Appeal rejected",
+                       "body_en": f"{notice.data.get('body_en', '')}\n\nReason: {data.note.strip()}"}
     await db.commit()
     await deliver(db, [notice])
     return {"id": str(row.id), "status": row.status, "report_status": report.status}

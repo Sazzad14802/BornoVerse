@@ -11,7 +11,7 @@ Gateways (Strategy pattern):
 gateways (and the IPN) share identical, idempotent, row-locked behaviour.
 """
 import calendar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, InvalidOperation
 from abc import ABC, abstractmethod
 import logging
@@ -129,6 +129,16 @@ def add_months(value, months):
                          day=min(value.day, calendar.monthrange(year, month + 1)[1]))
 
 
+RENEW_WINDOW = timedelta(days=1)
+
+
+def renewal_open(user) -> bool:
+    """Buying is possible without Premium, or in the last day before it expires."""
+    if not user.premium_until:
+        return True
+    return utc(user.premium_until) - datetime.now(timezone.utc) <= RENEW_WINDOW
+
+
 async def current_plan(db, user):
     """The plan of the latest successful subscription while Premium is active."""
     if not user.premium_until or utc(user.premium_until) <= datetime.now(timezone.utc):
@@ -158,10 +168,9 @@ async def initiate(db, user, data):
         plan = await db.get(Plan, data.plan_id) if data.plan_id else None
         if not plan or not plan.active:
             raise HTTPException(404, "Active subscription plan not found")
-        current = await current_plan(db, user)
-        if current and plan.months <= current.months:
-            # While Premium is active only a longer (higher) plan can be bought.
-            raise HTTPException(409, "You already have this plan or a higher one. Choose an upgrade.")
+        if not renewal_open(user):
+            # Every plan gives the same Premium; renewing opens a day before expiry.
+            raise HTTPException(409, "You already have Premium. You can renew in the last day before it expires.")
         amount, months = plan.price, plan.months
     else:
         if data.plan_id or user.account_type != "user" or user.publisher_status != "approved_pending_payment":
@@ -201,6 +210,8 @@ async def settle(db, user_id, order_id, outcome: str, **details) -> Order:
             account.publisher_status = "active"
             notice = notify(db, account.id, "payment.success", "প্রকাশক অ্যাকাউন্ট চালু হয়েছে",
                             f"৳{order.amount} পরিশোধ সফল। এখন আপনি অডিওবুক প্রকাশ করতে পারবেন।",
+                            en=("Publisher account activated",
+                                f"Payment of BDT {order.amount} received. You can now publish audiobooks."),
                             order_id=order.id)
         else:
             now = datetime.now(timezone.utc)
@@ -209,6 +220,8 @@ async def settle(db, user_id, order_id, outcome: str, **details) -> Order:
             account.subscription_cancelled = False
             notice = notify(db, account.id, "payment.success", "প্রিমিয়াম সক্রিয় হয়েছে",
                             f"৳{order.amount} পরিশোধ সফল। প্রিমিয়াম {account.premium_until:%d %b %Y} পর্যন্ত।",
+                            en=("Premium is active",
+                                f"Payment of BDT {order.amount} received. Premium until {account.premium_until:%d %b %Y}."),
                             order_id=order.id)
     order.status = outcome
     order.updated_at = datetime.now(timezone.utc)
@@ -316,6 +329,74 @@ async def close_month(db, actor, month):
     audit(db, actor, "finance.close_month", month, revenue=str(revenue), pool=str(pool))
     await db.commit()
     return snapshot
+
+def previous_month(month: str) -> str:
+    year, number = map(int, month.split("-"))
+    return f"{year - 1}-12" if number == 1 else f"{year}-{number - 1:02d}"
+
+
+async def close_due_months(db) -> list[str]:
+    """Close every completed month that has listens or revenue and is not closed yet
+    (runs automatically; admins can still close a month by hand)."""
+    current = month_now()
+    months = set((await db.scalars(select(EligibleView.month).where(EligibleView.month < current).distinct())).all())
+    months.add(previous_month(current))
+    closed = set((await db.scalars(select(FinancialSnapshot.month))).all())
+    done = []
+    for month in sorted(months - closed):
+        if month >= current:
+            continue
+        await close_month(db, None, month)
+        done.append(month)
+    return done
+
+
+async def month_estimate(db, publisher_id) -> dict:
+    """This month so far: the same split close_month will make, with today's numbers."""
+    from zoneinfo import ZoneInfo
+    month = month_now()
+    start = datetime.strptime(month, "%Y-%m").replace(tzinfo=ZoneInfo("Asia/Dhaka"))
+    revenue = await db.scalar(select(func.coalesce(func.sum(Order.amount), 0)).where(
+        Order.status == "success", Order.kind == "subscription", Order.updated_at >= start))
+    policy = await configuration(db)
+    pool = Decimal(revenue) * Decimal(policy["publisher_percent"]) / 100
+    total = await db.scalar(select(func.count()).select_from(EligibleView).where(EligibleView.month == month)) or 0
+    mine = await db.scalar(select(func.count()).select_from(EligibleView).where(
+        EligibleView.month == month, EligibleView.publisher_id == publisher_id)) or 0
+    estimate = (pool * mine / total).quantize(Decimal("0.01"), rounding=ROUND_DOWN) if total else Decimal("0.00")
+    return {"month": month, "estimated": str(estimate), "eligible_views": mine, "all_eligible_views": total,
+            "publisher_percent": policy["publisher_percent"]}
+
+
+async def premium_reminders(db) -> int:
+    """One "renew?" reminder a day before Premium ends, and one notice when it has ended."""
+    now = datetime.now(timezone.utc)
+    notices = []
+    expiring = (await db.scalars(select(User).where(
+        User.premium_until.is_not(None), User.premium_until > now, User.premium_until <= now + RENEW_WINDOW))).all()
+    for user in expiring:
+        if user.premium_reminder_for and utc(user.premium_reminder_for) == utc(user.premium_until):
+            continue
+        user.premium_reminder_for = user.premium_until
+        when = utc(user.premium_until)
+        notices.append(notify(db, user.id, "premium.expiring", "প্রিমিয়াম কাল শেষ হচ্ছে",
+                              f"আপনার প্রিমিয়াম {when:%d %b %Y} তারিখে শেষ হবে। শোনা চালিয়ে যেতে এখনই রিনিউ করুন।",
+                              en=("Premium ends tomorrow",
+                                  f"Your Premium ends on {when:%d %b %Y}. Renew now to keep listening."),))
+    expired = (await db.scalars(select(User).where(
+        User.premium_until.is_not(None), User.premium_until <= now,
+        User.premium_until > now - timedelta(days=7)))).all()
+    for user in expired:
+        if user.premium_expired_for and utc(user.premium_expired_for) == utc(user.premium_until):
+            continue
+        user.premium_expired_for = user.premium_until
+        notices.append(notify(db, user.id, "premium.expired", "প্রিমিয়ামের মেয়াদ শেষ",
+                              "পছন্দের প্ল্যান বেছে নিয়ে আবার প্রিমিয়াম চালু করুন।",
+                              en=("Your Premium has ended", "Choose a plan to turn Premium on again.")))
+    await db.commit()
+    await deliver(db, notices)
+    return len(notices)
+
 
 async def balance(db, publisher_id):
     earned = await db.scalar(select(func.coalesce(func.sum(Ledger.amount), 0)).where(Ledger.publisher_id == publisher_id))

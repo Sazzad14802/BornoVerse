@@ -9,7 +9,10 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Alert, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Avatar } from '../../components/Avatar';
+import { changePicture } from '../../utils/pictureFlow';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AppHeader } from '../../components/AppHeader';
@@ -115,7 +118,7 @@ export function ChannelScreen() {
     try {
       await action();
     } catch (error) {
-      Alert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
+      AppAlert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
     } finally {
       setBusy(null);
     }
@@ -160,7 +163,7 @@ export function ChannelScreen() {
       await addToChosenPlaylist(book.id);
       setSheet(null);
       await data.reload();
-      Alert.alert(tx('প্রকাশিত হয়েছে', 'Published'), tx(`«${book.title}» এখন চ্যানেলে আছে।`, `“${book.title}” is now live in this channel.`));
+      AppAlert.alert(tx('প্রকাশিত হয়েছে', 'Published'), tx(`«${book.title}» এখন চ্যানেলে আছে।`, `“${book.title}” is now live in this channel.`));
     });
 
   const addExisting = (book: Audiobook) =>
@@ -179,7 +182,7 @@ export function ChannelScreen() {
     });
 
   const removeFromChannel = (book: Audiobook) =>
-    Alert.alert(book.title, tx('চ্যানেল থেকে সরালে এটি আর প্রকাশিত থাকবে না।', 'Removing it from the channel unpublishes it.'), [
+    AppAlert.alert(book.title, tx('চ্যানেল থেকে সরালে এটি আর প্রকাশিত থাকবে না।', 'Removing it from the channel unpublishes it.'), [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       {
         text: tx('সরান', 'Remove'),
@@ -245,6 +248,32 @@ export function ChannelScreen() {
         refreshControl={<RefreshControl refreshing={data.isRefreshing} onRefresh={data.refresh} tintColor={Colors.primary} />}
         ListHeaderComponent={
           <View style={styles.header}>
+            <View style={styles.logoRow}>
+              <Pressable
+                onPress={() =>
+                  changePicture({
+                    tx,
+                    title: tx('চ্যানেলের লোগো', 'Channel logo'),
+                    hasPicture: !!channel.avatar_url,
+                    upload: async (file) => {
+                      await publisherApi.uploadChannelAvatar(channel.id, file);
+                      await data.reload();
+                    },
+                    remove: async () => {
+                      await publisherApi.removeChannelAvatar(channel.id);
+                      await data.reload();
+                    },
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={tx('চ্যানেলের লোগো বদলান', 'Change channel logo')}
+              >
+                <Avatar name={channel.name} uri={channel.avatar_url} size={64} editable />
+              </Pressable>
+              <Text style={styles.logoHint}>
+                {tx('লোগোতে চাপ দিয়ে চ্যানেলের ছবি বদলান। শ্রোতারা এটি দেখবেন।', 'Tap the logo to change the channel picture listeners see.')}
+              </Text>
+            </View>
             {channel.moderated ? (
               <View style={styles.restricted}>
                 <Text style={styles.restrictedText}>
@@ -443,6 +472,17 @@ export function ChannelScreen() {
 }
 
 const styles = StyleSheet.create({
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  logoHint: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background,

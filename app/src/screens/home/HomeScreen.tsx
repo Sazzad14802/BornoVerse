@@ -8,7 +8,8 @@
  */
 
 import React, { useCallback } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { AudiobookCard } from '../../components/AudiobookCard';
@@ -68,7 +69,7 @@ export function HomeScreen() {
       await loadAudiobook(book);
       navigation.navigate('Player', { audiobookId: book.id });
     } catch (error) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
     }
   };
 

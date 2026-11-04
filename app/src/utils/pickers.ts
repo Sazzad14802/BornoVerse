@@ -48,6 +48,38 @@ export function isMp3(file: PickedFile): boolean {
   return file.name.toLowerCase().endsWith('.mp3') || file.mimeType === 'audio/mpeg';
 }
 
+/** Square picture for a profile or a channel logo (asks for gallery access). */
+export async function pickProfileImage(): Promise<PickedFile | null> {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) {
+    throw new PermissionDenied(permission.canAskAgain);
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['images'],
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 0.8,
+  });
+  if (result.canceled || !result.assets?.length) return null;
+  const asset = result.assets[0];
+  if (asset.fileSize && asset.fileSize > MAX_COVER_MB * 1024 * 1024) {
+    throw new PickError(`Picture is larger than ${MAX_COVER_MB} MB`);
+  }
+  return {
+    uri: asset.uri,
+    name: asset.fileName ?? `picture.${asset.mimeType === 'image/png' ? 'png' : 'jpg'}`,
+    mimeType: asset.mimeType ?? 'image/jpeg',
+    file: (asset as any).file,
+  };
+}
+
+/** Gallery access was refused; `canAskAgain` false means only Settings can grant it. */
+export class PermissionDenied extends Error {
+  constructor(public canAskAgain: boolean) {
+    super('Gallery permission denied');
+  }
+}
+
 /** Square-cropped cover image from the gallery. */
 export async function pickCoverImage(): Promise<PickedFile | null> {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();

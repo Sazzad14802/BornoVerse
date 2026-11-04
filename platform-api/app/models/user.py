@@ -51,6 +51,12 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     subscription_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Mirror of the latest active publishing restriction; expires on its own.
     publishing_restricted_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Profile picture (public image URL) and app language for notifications (bn/en).
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(512))
+    # The premium_until value each reminder was sent for (one reminder per period).
+    premium_reminder_for: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    premium_expired_for: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    language: Mapped[str] = mapped_column(String(5), default="bn", server_default="bn", nullable=False)
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
         UniqueConstraint("username", name="uq_users_username"),

@@ -101,11 +101,21 @@ def action(db, admin, report: Report, kind: str, owner_id, **details) -> Moderat
     return row
 
 
-def notice_body(title: str, violation: str, lines: list[str], appeal: bool) -> str:
+def notice_body(title: str, violation: str, lines: list[tuple[str, str]], appeal: bool,
+                english: bool = False) -> str:
+    """The owner's notice. `lines` are (Bangla, English) pairs of the actions taken."""
+    if english:
+        body = [f"Your published content “{title}” was reported and reviewed by our moderation team.",
+                f"Violation: {CATEGORIES.get(violation or 'other', CATEGORIES['other'])[1]}"]
+        if lines:
+            body.append("Actions taken:\n" + "\n".join(f"- {en}" for _, en in lines))
+        if appeal:
+            body.append(f"If you think this is a mistake, appeal within {APPEAL_DAYS} days (Publisher studio > Appeal).")
+        return "\n\n".join(body)
     body = [f"আপনার প্রকাশিত কনটেন্ট «{title}» রিপোর্ট হয়েছে এবং আমাদের মডারেশন টিম পর্যালোচনা করেছে।",
             f"লঙ্ঘন: {category_label(violation)}"]
     if lines:
-        body.append("নেওয়া ব্যবস্থা:\n" + "\n".join(f"- {line}" for line in lines))
+        body.append("নেওয়া ব্যবস্থা:\n" + "\n".join(f"- {bn}" for bn, _ in lines))
     if appeal:
         body.append(f"সিদ্ধান্তটি ভুল মনে হলে {APPEAL_DAYS} দিনের মধ্যে আপিল করুন (প্রকাশক স্টুডিও > আপিল করুন)।")
     return "\n\n".join(body)
@@ -121,16 +131,17 @@ async def take_actions(db: AsyncSession, admin: User, report: Report, *, violati
     book = await db.get(Audiobook, report.audiobook_id)
     owner = await db.get(User, report.owner_id or book.owner_id)
     report.owner_id, report.violation = owner.id, violation
-    lines: list[str] = []
+    lines: list[tuple[str, str]] = []
     if hide and book and not book.moderated:
         book.moderated = True
         action(db, admin, report, "hide", owner.id)
         audit(db, admin, "moderation.content.hidden", book.id, report_id=str(report.id), note=note)
-        lines.append("কনটেন্টটি সাময়িকভাবে পাবলিক থেকে লুকানো হয়েছে।")
+        lines.append(("কনটেন্টটি সাময়িকভাবে পাবলিক থেকে লুকানো হয়েছে।", "The content has been hidden from the public for now."))
     if restrict_days:
         await restrict(db, admin, owner, report, restrict_days, note or category_label(violation))
         action(db, admin, report, "restrict", owner.id, days=restrict_days)
-        lines.append(f"আপনার প্রকাশের সুবিধা {restrict_days} দিনের জন্য সীমিত করা হয়েছে।")
+        lines.append((f"আপনার প্রকাশের সুবিধা {restrict_days} দিনের জন্য সীমিত করা হয়েছে।",
+                      f"Your publishing is restricted for {restrict_days} days."))
     if flag_note:
         # Internal: never mentioned to the owner.
         action(db, admin, report, "flag", owner.id, note=flag_note)
@@ -141,10 +152,12 @@ async def take_actions(db: AsyncSession, admin: User, report: Report, *, violati
         report.appeal_deadline = now() + timedelta(days=APPEAL_DAYS)
         action(db, admin, report, "notify", owner.id, message=message)
         body = notice_body(book.title if book else "", violation, lines, appeal=True)
+        body_en = notice_body(book.title if book else "", violation, lines, appeal=True, english=True)
         if message:
             body += f"\n\nমডারেটরের বার্তা: {message}"
+            body_en += f"\n\nModerator's message: {message}"
         notice = notify(db, owner.id, "moderation.notice", "কনটেন্ট মডারেশন নোটিশ", body,
-                        report_id=str(report.id), audiobook_id=str(report.audiobook_id))
+                        en=("Content moderation notice", body_en), report_id=str(report.id), audiobook_id=str(report.audiobook_id))
     set_status(db, admin, report, "action_taken", note, violation=violation, hidden=hide,
                restrict_days=restrict_days, flagged=bool(flag_note), notified=user_facing)
     for other in await siblings(db, report):
@@ -196,32 +209,38 @@ async def confirm_violation(db: AsyncSession, admin: User, report: Report, *, de
     strikes = await active_strikes(db, owner.id)
     action(db, admin, report, "strike", owner.id, total=strikes)
     audit(db, admin, "moderation.user.strike", owner.id, report_id=str(report.id), total_strikes=strikes, note=note)
-    lines = [f"আপনার অ্যাকাউন্টে একটি স্ট্রাইক যোগ হয়েছে (মোট {strikes})।"]
+    lines = [(f"আপনার অ্যাকাউন্টে একটি স্ট্রাইক যোগ হয়েছে (মোট {strikes})।",
+              f"A strike was added to your account (total {strikes}).")]
     if strikes >= SUSPEND_AT:
         owner.suspended = True
         owner.token_version += 1
         action(db, admin, report, "suspend", owner.id)
         audit(db, admin, "moderation.user.suspended", owner.id, report_id=str(report.id), total_strikes=strikes)
-        lines.append("বারবার নীতিমালা লঙ্ঘনের কারণে আপনার অ্যাকাউন্ট স্থায়ীভাবে স্থগিত করা হয়েছে।")
+        lines.append(("বারবার নীতিমালা লঙ্ঘনের কারণে আপনার অ্যাকাউন্ট স্থায়ীভাবে স্থগিত করা হয়েছে।",
+                      "Your account has been suspended for repeated policy violations."))
     elif STRIKE_POLICY.get(strikes):
         days = STRIKE_POLICY[strikes]
         await restrict(db, admin, owner, report, days, f"Strike {strikes}")
         action(db, admin, report, "restrict", owner.id, days=days, automatic=True)
-        lines.append(f"স্ট্রাইক নীতিমালা অনুযায়ী প্রকাশের সুবিধা {days} দিনের জন্য সীমিত।")
+        lines.append((f"স্ট্রাইক নীতিমালা অনুযায়ী প্রকাশের সুবিধা {days} দিনের জন্য সীমিত।",
+                      f"Under the strike policy, publishing is restricted for {days} days."))
     else:
-        lines.append("এটি একটি সতর্কবার্তা। পুনরায় লঙ্ঘন হলে প্রকাশের সুবিধা সীমিত হবে।")
+        lines.append(("এটি একটি সতর্কবার্তা। পুনরায় লঙ্ঘন হলে প্রকাশের সুবিধা সীমিত হবে।",
+                      "This is a warning. Another violation will restrict publishing."))
     if delete_content and book and book.publication_status != "deleted":
         book.publication_status, book.moderated = "deleted", True
         action(db, admin, report, "delete", owner.id)
         audit(db, admin, "moderation.content.deleted", book.id, report_id=str(report.id), note=note)
-        lines.insert(0, "কনটেন্টটি স্থায়ীভাবে সরানো হয়েছে।")
+        lines.insert(0, ("কনটেন্টটি স্থায়ীভাবে সরানো হয়েছে।", "The content has been permanently removed."))
     report.resolution = note or "Violation confirmed"
     set_status(db, admin, report, "resolved", note, outcome="violation_confirmed", deleted=delete_content)
     for other in await siblings(db, report):
         other.resolution = f"Handled in case {report.id}"
         set_status(db, admin, other, "resolved", f"Merged into case {report.id}")
+    title = book.title if book else ""
     return notify(db, owner.id, "moderation.violation_confirmed", "মডারেশন সিদ্ধান্ত চূড়ান্ত",
-                  notice_body(book.title if book else "", violation, lines, appeal=False),
+                  notice_body(title, violation, lines, appeal=False),
+                  en=("Moderation decision is final", notice_body(title, violation, lines, appeal=False, english=True)),
                   report_id=str(report.id), audiobook_id=str(report.audiobook_id))
 
 

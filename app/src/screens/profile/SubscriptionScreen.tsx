@@ -1,13 +1,15 @@
 /**
- * SubscriptionScreen — Premium plans.
+ * SubscriptionScreen — Premium plans. Every plan gives the same Premium; they
+ * only differ in length and price.
  * - No Premium: every plan, with the benefits.
- * - Premium: the current plan and only longer plans as upgrades; on the
- *   longest plan nothing can be bought. Payment history has its own screen.
- * Prices come from the server, which also refuses the same or a shorter plan.
+ * - Premium: the current plan and its end date, nothing to buy. In the last
+ *   day (a reminder notification is sent) renewing opens with every plan.
+ * There is no automatic renewal. The server enforces the same rules.
  */
 
 import React, { useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
@@ -51,9 +53,10 @@ export function SubscriptionScreen() {
   const allPlans = data.data?.plans ?? [];
   const current = premium ? data.data?.current ?? null : null;
   const currentPlan = current?.plan ?? null;
-  // While Premium is active only longer plans are offered.
-  const plans = current && currentPlan ? allPlans.filter((p) => current.upgrade_plan_ids.includes(p.id)) : allPlans;
-  const isHighest = !!currentPlan && plans.length === 0;
+  // Already Premium: nothing to buy until the renewal window (last day) opens.
+  const renewing = premium && !!current?.can_buy;
+  const locked = premium && !renewing;
+  const plans = locked ? [] : allPlans;
   const chosen = plans.find((p) => p.id === selected) ?? plans[0];
 
   const monthly = (plan: Plan) => Number(plan.price) / plan.months;
@@ -66,14 +69,14 @@ export function SubscriptionScreen() {
       const order = await paymentsApi.initiate('subscription', newIdempotencyKey(), chosen.id);
       navigation.navigate('PaymentCheckout', { orderId: order.id });
     } catch (error) {
-      Alert.alert(tx('পেমেন্ট শুরু করা যায়নি', 'Could not start payment'), errorMessage(error));
+      AppAlert.alert(tx('পেমেন্ট শুরু করা যায়নি', 'Could not start payment'), errorMessage(error));
     } finally {
       setBuying(false);
     }
   };
 
   const cancel = () =>
-    Alert.alert(
+    AppAlert.alert(
       tx('নবায়ন বন্ধ করবেন?', 'Turn off renewal?'),
       tx('মেয়াদ শেষ হওয়া পর্যন্ত প্রিমিয়াম থাকবে।', 'Premium stays active until it expires.'),
       [
@@ -85,7 +88,7 @@ export function SubscriptionScreen() {
               await subscriptionApi.cancel();
               await refreshUser();
             } catch (error) {
-              Alert.alert(tx('ত্রুটি', 'Error'), errorMessage(error));
+              AppAlert.alert(tx('ত্রুটি', 'Error'), errorMessage(error));
             }
           },
         },
@@ -127,17 +130,35 @@ export function SubscriptionScreen() {
           <StateView kind="loading" />
         ) : data.error && !data.data ? (
           <StateView kind="error" message={data.error} actionLabel={tx('আবার চেষ্টা', 'Retry')} onAction={data.reload} />
-        ) : isHighest ? (
+        ) : locked ? (
           <View style={styles.check}>
             <Ionicons name="ribbon-outline" size={40} color={Colors.tintPurpleText} />
-            <Text style={styles.checkTitle}>{tx('আপনি সর্বোচ্চ প্ল্যানে আছেন', 'You are on our highest plan')}</Text>
-            <Text style={styles.activeText}>
-              {tx('সব প্রিমিয়াম সুবিধা চালু আছে। উপভোগ করুন!', 'Every Premium benefit is on. Enjoy listening!')}
+            <Text style={styles.checkTitle}>{tx('আপনি প্রিমিয়াম সদস্য', 'You are a Premium member')}</Text>
+            <Text style={styles.checkText}>
+              {tx(
+                'সব প্ল্যানে একই প্রিমিয়াম সুবিধা, তাই এখন কিছু কিনতে হবে না। মেয়াদ শেষ হওয়ার আগের দিন আমরা নোটিফিকেশন দিয়ে রিনিউ করতে মনে করিয়ে দেব।',
+                'Every plan gives the same Premium, so there is nothing to buy now. A day before it ends we will remind you to renew.',
+              )}
             </Text>
+            {current?.renew_from ? (
+              <Text style={styles.activeText}>
+                {tx(`রিনিউ করা যাবে: ${formatDate(current.renew_from, false)} থেকে`, `Renewal opens on ${formatDate(current.renew_from, true)}`)}
+              </Text>
+            ) : null}
           </View>
         ) : (
           <>
-            {currentPlan ? <Text style={styles.sectionTitle}>{tx('প্ল্যান আপগ্রেড করুন', 'Upgrade your plan')}</Text> : null}
+            {renewing ? (
+              <View style={styles.renewBanner}>
+                <Ionicons name="time-outline" size={20} color={Colors.tintAmberText} />
+                <Text style={styles.renewText}>
+                  {tx(
+                    'প্রিমিয়াম শীঘ্রই শেষ হচ্ছে। যেকোনো প্ল্যান বেছে নিয়ে রিনিউ করুন; নতুন মেয়াদ বর্তমান মেয়াদের পরে যোগ হবে।',
+                    'Premium ends soon. Pick any plan to renew; the new period starts when the current one ends.',
+                  )}
+                </Text>
+              </View>
+            ) : null}
             {plans.map((plan) => {
               const active = chosen?.id === plan.id;
               const saving = base ? Math.round((1 - monthly(plan) / base) * 100) : 0;
@@ -167,8 +188,8 @@ export function SubscriptionScreen() {
             <AppButton
               label={
                 chosen
-                  ? currentPlan
-                    ? tx(`${formatMoney(chosen.price)} দিয়ে আপগ্রেড করুন`, `Upgrade for ${formatMoney(chosen.price)}`)
+                  ? renewing
+                    ? tx(`${formatMoney(chosen.price)} দিয়ে রিনিউ করুন`, `Renew for ${formatMoney(chosen.price)}`)
                     : tx(`${formatMoney(chosen.price)} পরিশোধ করুন`, `Pay ${formatMoney(chosen.price)}`)
                   : tx('প্ল্যান বেছে নিন', 'Choose a plan')
               }
@@ -177,8 +198,8 @@ export function SubscriptionScreen() {
               disabled={!chosen}
             />
             <Text style={styles.fine}>
-              {currentPlan
-                ? tx('নতুন প্ল্যানের মেয়াদ বর্তমান মেয়াদের সাথে যোগ হবে।', 'The new plan is added on top of your current expiry.')
+              {renewing
+                ? tx('স্বয়ংক্রিয় নবায়ন নেই। শুধু আপনি চাইলে রিনিউ হবে।', 'There is no automatic renewal; it renews only when you choose.')
                 : tx('bKash, Nagad, কার্ড ও ব্যাংক — SSLCommerz-এর মাধ্যমে।', 'bKash, Nagad, cards and banks — via SSLCommerz.')}
             </Text>
           </>
@@ -303,9 +324,24 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     textAlign: 'center',
   },
-  sectionTitle: {
-    fontSize: FontSizes.base,
-    fontWeight: '700',
-    color: Colors.textPrimary,
+  checkText: {
+    fontSize: FontSizes.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  renewBanner: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    alignItems: 'flex-start',
+    backgroundColor: Colors.tintAmber,
+    borderRadius: Radius.md,
+    padding: Spacing.md,
+  },
+  renewText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    color: Colors.tintAmberText,
+    lineHeight: 20,
   },
 });

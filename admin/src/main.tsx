@@ -4,6 +4,7 @@ import { request, setToken, documentUrl } from "./api";
 import "./styles.css";
 import { Icon, Modal, Row, dateTime, memberId } from "./ui";
 import { AppealsPage, ReportsPage, UserRecordModal } from "./Moderation";
+import { WithdrawalsPage } from "./Withdrawals";
 const sections: [string, [string, string][]][] = [
   ["", [["Overview", "summary"]]],
   [
@@ -490,9 +491,10 @@ export function App() {
         {page === "appeals" && (
           <AppealsPage listen={listen} onChanged={loadAttention} />
         )}
+        {page === "withdrawals" && <WithdrawalsPage onChanged={loadAttention} />}
         {!busy &&
           Array.isArray(rows) &&
-          !["reports", "appeals"].includes(page) && (
+          !["reports", "appeals", "withdrawals"].includes(page) && (
             <>
               {page === "plans" && (
                 <button

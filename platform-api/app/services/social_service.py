@@ -35,7 +35,8 @@ async def announce(db: AsyncSession, book: Audiobook) -> list[Notification]:
         ChannelFollow.channel_id == book.channel_id, ChannelFollow.notify.is_(True),
         ChannelFollow.user_id != book.owner_id))).all()
     return [notify(db, follower, "channel.new_audiobook", f"{channel.name}: নতুন অডিওবুক",
-                   book.title, audiobook_id=str(book.id), channel_id=str(channel.id))
+                   book.title, en=(f"{channel.name}: new audiobook", book.title),
+                   image=book.cover_image_url or "", audiobook_id=str(book.id), channel_id=str(channel.id))
             for follower in followers]
 
 

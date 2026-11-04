@@ -198,37 +198,79 @@ async def test_eligible_views_deduplicated_and_withdrawal_audit(client,db_sessio
     assert await db_session.scalar(select(func.count()).select_from(EligibleView))==1
     publisher_id=UUID(owner_tokens['user']['id'])
     db_session.add(Ledger(publisher_id=publisher_id,month='2026-01',amount=Decimal('100'),kind='earning',reference='test-earning'));await db_session.commit()
-    response=await client.post('/api/v1/publisher/withdrawals',headers=owner_tokens['headers'],json={"amount":"75.00","destination":"mock-wallet"})
+    body={"amount":"75.00","method":"bkash","account_number":"01712345678"}
+    assert (await client.post('/api/v1/publisher/withdrawals',headers=owner_tokens['headers'],json={**body,"account_number":"123"})).status_code==422
+    assert (await client.post('/api/v1/publisher/withdrawals',headers=owner_tokens['headers'],json={"amount":"10.00","method":"bank","account_number":"12345678"})).status_code==422
+    response=await client.post('/api/v1/publisher/withdrawals',headers=owner_tokens['headers'],json=body)
     assert response.status_code==200,response.text
-    assert (await client.post('/api/v1/publisher/withdrawals',headers=owner_tokens['headers'],json={"amount":"75.00","destination":"mock-wallet"})).status_code==409
+    assert response.json()['destination']=="Bkash: 01712345678"
+    # More than the available balance is refused.
+    assert (await client.post('/api/v1/publisher/withdrawals',headers=owner_tokens['headers'],json=body)).status_code==409
     id=response.json()['id']
-    for action in ['approve','complete']:
-        assert (await client.post(f'/api/v1/admin/withdrawals/{id}/decision',headers=admin,json={"action":action,"reason":"Test simulated settlement"})).status_code==200
-    assert (await client.post(f'/api/v1/admin/withdrawals/{id}/decision',headers=admin,json={"action":"complete","reason":"Duplicate completion"})).status_code==409
-    assert (await client.get('/api/v1/publisher/dashboard',headers=owner_tokens['headers'])).json()['available_balance']=='25.00'
+    url=f'/api/v1/admin/withdrawals/{id}/decision'
+    assert (await client.post(url,headers=admin,json={"action":"approve"})).status_code==422
+    assert (await client.post(url,headers=admin,json={"action":"approve","scheduled_for":"2026-12-05T00:00:00Z"})).status_code==200
+    assert (await client.post(url,headers=admin,json={"action":"complete"})).status_code==422
+    done=await client.post(url,headers=admin,json={"action":"complete","payout_reference":"BKX123456","payout_note":"Sent from merchant wallet"})
+    assert done.status_code==200,done.text
+    assert done.json()['payout_reference']=="BKX123456" and done.json()['paid_at']
+    assert (await client.post(url,headers=admin,json={"action":"complete","payout_reference":"again"})).status_code==409
+    dashboard=(await client.get('/api/v1/publisher/dashboard',headers=owner_tokens['headers'])).json()
+    assert dashboard['available_balance']=='25.00' and dashboard['withdrawn']=='75.00' and dashboard['lifetime_earned']=='100.00'
 
-async def test_premium_can_only_upgrade_and_gets_invoices(client,db_session,mock_payments):
-    _,headers=await account(client)
+async def test_premium_is_bought_once_and_renewed_at_the_end(client,db_session,mock_payments):
+    listener,headers=await account(client)
     monthly=Plan(name="Monthly",months=1,price=Decimal('150'));yearly=Plan(name="Yearly",months=12,price=Decimal('1200'))
     db_session.add_all([monthly,yearly]);await db_session.commit()
-    current=(await client.get('/api/v1/subscriptions/current',headers=headers)).json()
-    assert current['plan'] is None and len(current['upgrade_plan_ids'])==2 and current['is_highest'] is False
+    assert (await client.get('/api/v1/subscriptions/current',headers=headers)).json()['can_buy'] is True
 
     async def buy(plan,key):
         return await client.post('/api/v1/payments',headers=headers,json={"kind":"subscription","plan_id":str(plan.id),"idempotency_key":"order-key-"+key})
-    first=await buy(monthly,"m1");assert first.status_code==200,first.text;order=first.json()
-    await client.post(f"/api/v1/payments/{order['id']}/mock-confirm",headers=headers,json={"status":"success"})
+    first=await buy(monthly,"m1");assert first.status_code==200,first.text
+    await client.post(f"/api/v1/payments/{first.json()['id']}/mock-confirm",headers=headers,json={"status":"success"})
     current=(await client.get('/api/v1/subscriptions/current',headers=headers)).json()
-    assert current['plan']['name']=="Monthly" and current['upgrade_plan_ids']==[str(yearly.id)]
-    # The same plan again is refused while Premium is active; a longer one is an upgrade.
+    assert current['plan']['name']=="Monthly" and current['can_buy'] is False and current['renew_from']
+    # Already Premium: no plan can be bought, not even a longer one.
     assert (await buy(monthly,"m2")).status_code==409
-    upgrade=(await buy(yearly,"y1")).json()
+    assert (await buy(yearly,"y1")).status_code==409
+
+    # In the last day the reminder goes out once and renewing opens, with any plan.
+    user=await db_session.get(User,UUID(listener['id']))
+    user.premium_until=datetime.now(timezone.utc)+timedelta(hours=10);await db_session.commit()
+    from app.services.billing import premium_reminders
+    from app.models.notification import Notification
+    assert await premium_reminders(db_session)==1 and await premium_reminders(db_session)==0
+    note=await db_session.scalar(select(Notification).where(Notification.kind=="premium.expiring"))
+    assert note.data["title_en"]=="Premium ends tomorrow"
+    assert (await client.get('/api/v1/subscriptions/current',headers=headers)).json()['can_buy'] is True
+    upgrade=(await buy(yearly,"y2")).json()
     await client.post(f"/api/v1/payments/{upgrade['id']}/mock-confirm",headers=headers,json={"status":"success"})
-    current=(await client.get('/api/v1/subscriptions/current',headers=headers)).json()
-    assert current['plan']['name']=="Yearly" and current['is_highest'] is True
-    assert (await buy(yearly,"y2")).status_code==409
+    await db_session.refresh(user)
+    until=user.premium_until if user.premium_until.tzinfo else user.premium_until.replace(tzinfo=timezone.utc)
+    assert until>datetime.now(timezone.utc)+timedelta(days=360)
 
     invoice=(await client.get(f"/api/v1/payments/{upgrade['id']}/invoice",headers=headers)).json()
     assert invoice['amount']=="1200.00" and invoice['invoice_number'].startswith("BV-") and "Yearly" in invoice['item']
     _,other=await account(client,email="other@example.com",username="otheruser")
     assert (await client.get(f"/api/v1/payments/{upgrade['id']}/invoice",headers=other)).status_code==404
+
+
+async def test_month_closes_automatically_and_estimate_and_analytics(client,db_session,owner_tokens,mock_payments):
+    from app.services.billing import close_due_months,previous_month
+    from app.models.platform import FinancialSnapshot
+    from app.services.policy import month_now
+    publisher=UUID(owner_tokens['user']['id'])
+    book=await public_book(db_session,owner_tokens['user'])
+    listener,headers=await account(client,email="fan@example.com",username="fanuser")
+    last=previous_month(month_now())
+    db_session.add(EligibleView(user_id=UUID(listener['id']),audiobook_id=book.id,publisher_id=publisher,month=last))
+    db_session.add(EligibleView(user_id=UUID(listener['id']),audiobook_id=book.id,publisher_id=publisher,month=month_now()))
+    db_session.add(PlaySession(user_id=UUID(listener['id']),audiobook_id=book.id,seconds=600))
+    await db_session.commit()
+    dashboard=(await client.get('/api/v1/publisher/dashboard',headers=owner_tokens['headers'])).json()
+    assert await db_session.get(FinancialSnapshot,last) is not None
+    assert await close_due_months(db_session)==[]
+    assert dashboard['this_month']['eligible_views']==1 and 'estimated' in dashboard['this_month']
+    stats=(await client.get('/api/v1/publisher/analytics',headers=owner_tokens['headers'])).json()
+    assert stats['listen_seconds']==600 and stats['distinct_listeners']==1 and stats['plays']==1
+    assert len(stats['daily'])==30 and stats['top_audiobooks'][0]['listen_seconds']==600

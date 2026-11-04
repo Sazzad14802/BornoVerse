@@ -1,14 +1,17 @@
+from typing import Optional
 from uuid import UUID
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from decimal import Decimal
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy import delete, select, func
 from app.api.deps import DatabaseDep, MemberDep, ActivePublisherDep
 from app.models import User, Audiobook, PlaybackProgress
 from app.models.platform import (Audit, PublisherApplication, Channel, Plan, Order, Withdrawal, Ledger,
-    EligibleView, Report, Playlist, PlaylistBook, Quota)
+    EligibleView, PlaySession, Report, Playlist, PlaylistBook, Quota)
 from app.schemas.platform import ChannelInput, PlaylistInput, OrderInput, CallbackInput, WithdrawalInput, ReportInput, ProfileInput
 from app.schemas.user import UserRead
-from app.services.policy import audit, configuration, is_publisher, month_now, premium
+from app.models.social import ChannelFollow
+from app.services.policy import audit, configuration, is_publisher, month_now, premium, utc
 from app.services.storage_service import get_storage_service
 from app.services.audiobook_service import get_audiobook_for_user
 from app.services import billing
@@ -62,9 +65,58 @@ async def generation_retry(id: UUID, db: DatabaseDep, user: MemberDep):
 
 @router.patch("/users/me")
 async def profile(data: ProfileInput, db: DatabaseDep, user: MemberDep):
-    user.full_name = data.full_name
+    if data.full_name is not None:
+        user.full_name = data.full_name
+    if data.language is not None:
+        user.language = data.language
     await db.commit()
     return UserRead.model_validate(user)
+
+def cover_key(url: Optional[str]) -> Optional[str]:
+    return "/uploads/covers/" + url.rsplit("/", 1)[-1] if url and url.startswith("/api/v1/covers/") else None
+
+async def replace_picture(row, file: Optional[UploadFile]) -> None:
+    """Store a new picture (JPEG/PNG/WebP, max 5 MB) on `row.avatar_url`, or clear it; drop the old file."""
+    old = cover_key(row.avatar_url)
+    if file is not None:
+        row.avatar_url = f"/api/v1/covers/{await get_storage_service().save_cover_image(file)}"
+    else:
+        row.avatar_url = None
+    if old:
+        try:
+            await get_storage_service().delete_file(old)
+        except Exception:
+            pass
+
+@router.post("/users/me/avatar")
+async def upload_avatar(db: DatabaseDep, user: MemberDep, file: UploadFile = File(...)):
+    await replace_picture(user, file)
+    await db.commit()
+    return UserRead.model_validate(user)
+
+@router.delete("/users/me/avatar")
+async def remove_avatar(db: DatabaseDep, user: MemberDep):
+    await replace_picture(user, None)
+    await db.commit()
+    return UserRead.model_validate(user)
+
+@router.post("/publisher/channels/{id}/avatar")
+async def upload_channel_avatar(id: UUID, db: DatabaseDep, user: MemberDep, file: UploadFile = File(...)):
+    row = await db.get(Channel, id)
+    if not row or row.owner_id != user.id:
+        raise HTTPException(404, "Channel not found")
+    await replace_picture(row, file)
+    await db.commit()
+    return record(row)
+
+@router.delete("/publisher/channels/{id}/avatar")
+async def remove_channel_avatar(id: UUID, db: DatabaseDep, user: MemberDep):
+    row = await db.get(Channel, id)
+    if not row or row.owner_id != user.id:
+        raise HTTPException(404, "Channel not found")
+    await replace_picture(row, None)
+    await db.commit()
+    return record(row)
 
 @router.get("/publisher/applications")
 async def applications(db: DatabaseDep, user: MemberDep):
@@ -136,16 +188,15 @@ async def plans(db: DatabaseDep):
 
 @router.get("/subscriptions/current")
 async def current_subscription(db: DatabaseDep, user: MemberDep):
-    """The active plan and the plans that count as an upgrade (longer ones).
-    With no active Premium every plan is available; on the longest plan none is."""
+    """The active plan and whether a plan can be bought now (no Premium, or its last day)."""
     current = await billing.current_plan(db, user)
-    plans = (await db.scalars(select(Plan).where(Plan.active.is_(True)).order_by(Plan.months))).all()
-    upgrades = [p for p in plans if not current or p.months > current.months]
+    can_buy = billing.renewal_open(user)
     return {
         "plan": {"id": str(current.id) if current.id else None, "name": current.name, "months": current.months} if current else None,
         "premium_until": user.premium_until,
-        "upgrade_plan_ids": [str(p.id) for p in upgrades],
-        "is_highest": bool(current) and not upgrades,
+        # Every plan is the same Premium: buying is for starting or renewing it.
+        "can_buy": can_buy,
+        "renew_from": (billing.utc(user.premium_until) - billing.RENEW_WINDOW) if user.premium_until and not can_buy else None,
     }
 
 @router.post("/subscriptions/cancel")
@@ -206,11 +257,20 @@ async def confirm(id: UUID, data: CallbackInput, db: DatabaseDep, user: MemberDe
 
 @router.get("/publisher/dashboard")
 async def dashboard(db: DatabaseDep, user: ActivePublisherDep):
+    # Finished months are closed automatically so their earnings show up here.
+    await billing.close_due_months(db)
     ledger = (await db.scalars(select(Ledger).where(Ledger.publisher_id == user.id).order_by(Ledger.created_at.desc()))).all()
     withdrawals = (await db.scalars(select(Withdrawal).where(Withdrawal.publisher_id == user.id).order_by(Withdrawal.created_at.desc()))).all()
+    earned = sum((l.amount for l in ledger if l.kind == "earning"), Decimal(0))
+    paid = sum((w.amount for w in withdrawals if w.status == "completed"), Decimal(0))
+    pending = sum((w.amount for w in withdrawals if w.status in ("pending", "approved")), Decimal(0))
     return {"available_balance": str(await billing.balance(db, user.id)),
+        "lifetime_earned": str(earned), "withdrawn": str(paid), "pending_withdrawals": str(pending),
+        "this_month": await billing.month_estimate(db, user.id),
         "eligible_views": await db.scalar(select(func.count()).select_from(EligibleView).where(EligibleView.publisher_id == user.id, EligibleView.month == month_now())),
         "audiobooks": await db.scalar(select(func.count()).select_from(Audiobook).where(Audiobook.owner_id == user.id)),
+        "followers": await db.scalar(select(func.count()).select_from(ChannelFollow).join(
+            Channel, Channel.id == ChannelFollow.channel_id).where(Channel.owner_id == user.id)) or 0,
         "ledger": [record(r) for r in ledger], "withdrawals": [record(r) for r in withdrawals]}
 
 @router.post("/publisher/withdrawals")
@@ -218,12 +278,72 @@ async def withdrawal(data: WithdrawalInput, db: DatabaseDep, user: ActivePublish
     await db.execute(select(User).where(User.id == user.id).with_for_update())
     if data.amount > await billing.balance(db, user.id):
         raise HTTPException(409, "Insufficient available balance")
-    row = Withdrawal(publisher_id=user.id, **data.model_dump())
+    row = Withdrawal(publisher_id=user.id, amount=data.amount, destination=data.destination_text(), method=data.method,
+                     account_name=data.account_name.strip(), account_number=data.account_number.strip(),
+                     bank_name=data.bank_name.strip(), branch=data.branch.strip())
     db.add(row)
     await db.flush()
     audit(db, user, "withdrawal.request", row.id, amount=str(data.amount))
     await db.commit()
     return record(row)
+
+@router.get("/publisher/analytics")
+async def analytics(db: DatabaseDep, user: ActivePublisherDep, days: int = Query(30, ge=7, le=180)):
+    """At-a-glance channel numbers for the last `days` days, with daily series."""
+    from datetime import timedelta
+    from app.models.platform import Report
+    from app.models.social import ChannelFollow
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    channel = await db.scalar(select(Channel).where(Channel.owner_id == user.id).limit(1))
+    books = select(Audiobook.id).where(Audiobook.owner_id == user.id)
+    # Listening by others (the publisher's own plays do not count).
+    plays = select(PlaySession).where(PlaySession.audiobook_id.in_(books), PlaySession.user_id != user.id)
+    sessions = (await db.scalars(plays.where(PlaySession.started_at >= since))).all()
+    follows = (await db.scalars(select(ChannelFollow).where(ChannelFollow.channel_id == channel.id))).all() if channel else []
+
+    def day(value) -> str:
+        return utc(value).date().isoformat()
+
+    series = {(since + timedelta(days=i + 1)).date().isoformat(): {"followers": 0, "listen_seconds": 0, "listeners": set()}
+              for i in range(days)}
+    for f in follows:
+        if f.created_at and utc(f.created_at) >= since and day(f.created_at) in series:
+            series[day(f.created_at)]["followers"] += 1
+    for s in sessions:
+        bucket = series.get(day(s.started_at))
+        if bucket:
+            bucket["listen_seconds"] += s.seconds or 0
+            bucket["listeners"].add(s.user_id)
+    per_book: dict = {}
+    for s in sessions:
+        per_book[s.audiobook_id] = per_book.get(s.audiobook_id, 0) + (s.seconds or 0)
+    titles = dict((await db.execute(select(Audiobook.id, Audiobook.title).where(Audiobook.id.in_(list(per_book))))).all()) if per_book else {}
+    reports = (await db.execute(select(Report.status, func.count()).where(Report.audiobook_id.in_(books))
+                                .group_by(Report.status))).all()
+    report_counts = {status: count for status, count in reports}
+    return {
+        "days": days,
+        "channel": {"id": str(channel.id), "name": channel.name} if channel else None,
+        "followers": len(follows),
+        "new_followers": sum(1 for f in follows if f.created_at and utc(f.created_at) >= since),
+        "listen_seconds": sum(s.seconds or 0 for s in sessions),
+        "plays": len(sessions),
+        "distinct_listeners": len({s.user_id for s in sessions}),
+        "all_time_listeners": await db.scalar(select(func.count(func.distinct(PlaySession.user_id))).where(
+            PlaySession.audiobook_id.in_(books), PlaySession.user_id != user.id)) or 0,
+        "eligible_views": await db.scalar(select(func.count()).select_from(EligibleView).where(
+            EligibleView.publisher_id == user.id, EligibleView.month == month_now())) or 0,
+        "audiobooks": await db.scalar(select(func.count()).select_from(Audiobook).where(
+            Audiobook.owner_id == user.id, Audiobook.publication_status != "deleted")) or 0,
+        "reports": {"total": sum(report_counts.values()), "open": report_counts.get("pending", 0) + report_counts.get("under_review", 0),
+                    "action_taken": report_counts.get("action_taken", 0) + report_counts.get("appealed", 0) + report_counts.get("resolved", 0),
+                    "dismissed": report_counts.get("dismissed", 0)},
+        "daily": [{"date": d, "followers": v["followers"], "listen_seconds": v["listen_seconds"], "listeners": len(v["listeners"])}
+                  for d, v in series.items()],
+        "top_audiobooks": [{"id": str(k), "title": titles.get(k, ""), "listen_seconds": v}
+                           for k, v in sorted(per_book.items(), key=lambda kv: -kv[1])[:5]],
+    }
 
 @router.get("/generation/quota")
 async def quota(db: DatabaseDep, user: MemberDep):

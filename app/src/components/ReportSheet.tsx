@@ -5,7 +5,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppAlert } from './AppAlert';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from './AppButton';
 import { ModalBottomSheet, SheetScrollView } from './ModalBottomSheet';
@@ -52,14 +53,14 @@ export function ReportSheet({ audiobookId, visible, onClose }: ReportSheetProps)
       const picked = await pickEvidence();
       if (picked) setFiles((current) => [...current, picked].slice(0, MAX_FILES));
     } catch (error) {
-      Alert.alert(tx('ফাইল', 'File'), errorMessage(error));
+      AppAlert.alert(tx('ফাইল', 'File'), errorMessage(error));
     }
   };
 
   const submit = async () => {
     if (!category) return;
     if (category === 'other' && details.trim().length < 5) {
-      Alert.alert(tx('কারণ লিখুন', 'Describe the problem'), tx('"অন্যান্য" বেছে নিলে কারণটি লিখুন।', 'Please describe the problem when choosing Other.'));
+      AppAlert.alert(tx('কারণ লিখুন', 'Describe the problem'), tx('"অন্যান্য" বেছে নিলে কারণটি লিখুন।', 'Please describe the problem when choosing Other.'));
       return;
     }
     setBusy(true);
@@ -70,15 +71,15 @@ export function ReportSheet({ audiobookId, visible, onClose }: ReportSheetProps)
       }
       reset();
       onClose();
-      Alert.alert(
+      AppAlert.alert(
         tx('রিপোর্ট জমা হয়েছে', 'Report submitted'),
         tx('ধন্যবাদ। আমাদের মডারেশন টিম এটি পর্যালোচনা করবে।', 'Thank you. Our moderation team will review it.'),
       );
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        Alert.alert(tx('আগেই রিপোর্ট করেছেন', 'Already reported'), tx('এই অডিওবুকটি আপনি আগেই রিপোর্ট করেছেন।', 'You have already reported this audiobook.'));
+        AppAlert.alert(tx('আগেই রিপোর্ট করেছেন', 'Already reported'), tx('এই অডিওবুকটি আপনি আগেই রিপোর্ট করেছেন।', 'You have already reported this audiobook.'));
       } else {
-        Alert.alert(tx('রিপোর্ট করা যায়নি', 'Could not report'), errorMessage(error));
+        AppAlert.alert(tx('রিপোর্ট করা যায়নি', 'Could not report'), errorMessage(error));
       }
     } finally {
       setBusy(false);

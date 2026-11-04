@@ -11,6 +11,8 @@ import { NotificationsProvider } from './src/contexts/NotificationsContext';
 import { PlayerProvider } from './src/contexts/PlayerContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { SheetHost } from './src/components/ModalBottomSheet';
+import { AppAlertHost } from './src/components/AppAlert';
+import { KeyboardInset } from './src/components/KeyboardInset';
 
 export default function App() {
   return (
@@ -20,9 +22,13 @@ export default function App() {
           <NotificationsProvider>
             <PlayerProvider>
               {/* Bottom sheets are drawn here, above every screen and the tab bar. */}
-              <SheetHost>
-                <AppNavigator />
-              </SheetHost>
+              {/* Lifts screens and sheets above the keyboard (Android is edge to edge). */}
+              <KeyboardInset>
+                <SheetHost>
+                  <AppNavigator />
+                </SheetHost>
+              </KeyboardInset>
+              <AppAlertHost />
               <StatusBar style="dark" />
             </PlayerProvider>
           </NotificationsProvider>

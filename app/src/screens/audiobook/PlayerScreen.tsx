@@ -12,18 +12,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  LayoutChangeEvent,
-  useWindowDimensions,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { ActivityIndicator, LayoutChangeEvent, useWindowDimensions, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -94,7 +84,10 @@ export function PlayerScreen() {
   const isMember = user?.account_type === 'user';
   // Artwork fits the screen: narrower on short phones, capped on tablets.
   const window = useWindowDimensions();
-  const artworkSize = Math.round(Math.min(window.width * 0.86, window.height * 0.4, 440));
+  // Everything fits on one screen: the artwork takes whatever height is left
+  // after the details and controls, up to 86% of the width (440 on tablets).
+  const [slot, setSlot] = useState({ width: 0, height: 0 });
+  const artworkSize = Math.floor(Math.max(0, Math.min(slot.width, window.width * 0.86, 440, slot.height - 16)));
   const bookId = requestedId ?? audiobook?.id;
 
   // Server copy of the book (tags, access) plus this listener's saved/downloaded state.
@@ -188,7 +181,7 @@ export function PlayerScreen() {
     info.setData((current) => (current ? { ...current, ...patch } : null));
 
   const premiumPrompt = (message: string) =>
-    Alert.alert(tx('প্রিমিয়াম প্রয়োজন', 'Premium required'), message, [
+    AppAlert.alert(tx('প্রিমিয়াম প্রয়োজন', 'Premium required'), message, [
       { text: tx('বাতিল', 'Cancel'), style: 'cancel' },
       { text: tx('প্রিমিয়াম নিন', 'Get Premium'), onPress: () => goToTab('ProfileTab', { screen: 'Subscription' }) },
     ]);
@@ -198,7 +191,7 @@ export function PlayerScreen() {
     try {
       await action();
     } catch (e) {
-      Alert.alert(title, errorMessage(e));
+      AppAlert.alert(title, errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -226,14 +219,14 @@ export function PlayerScreen() {
     playlistsApi
       .list()
       .then(setPlaylists)
-      .catch((e) => Alert.alert(tx('প্লেলিস্ট', 'Playlists'), errorMessage(e)));
+      .catch((e) => AppAlert.alert(tx('প্লেলিস্ট', 'Playlists'), errorMessage(e)));
   };
 
   const addToPlaylist = (playlist: Playlist) =>
     run('playlist', async () => {
       await playlistsApi.addBook(playlist.id, book.id);
       setSheet(null);
-      Alert.alert(tx('যোগ হয়েছে', 'Added'), tx(`«${playlist.name}»-এ যোগ করা হয়েছে।`, `Added to “${playlist.name}”.`));
+      AppAlert.alert(tx('যোগ হয়েছে', 'Added'), tx(`«${playlist.name}»-এ যোগ করা হয়েছে।`, `Added to “${playlist.name}”.`));
     }, tx('প্লেলিস্ট', 'Playlist'));
 
   const createPlaylist = () =>
@@ -244,7 +237,7 @@ export function PlayerScreen() {
       setNewPlaylist('');
       await playlistsApi.addBook(created.id, book.id);
       setSheet(null);
-      Alert.alert(tx('যোগ হয়েছে', 'Added'), tx(`«${created.name}»-এ যোগ করা হয়েছে।`, `Added to “${created.name}”.`));
+      AppAlert.alert(tx('যোগ হয়েছে', 'Added'), tx(`«${created.name}»-এ যোগ করা হয়েছে।`, `Added to “${created.name}”.`));
     }, tx('প্লেলিস্ট', 'Playlist'));
 
   const toggleOffline = async () => {
@@ -261,7 +254,7 @@ export function PlayerScreen() {
     await run('offline', async () => {
       await offline.download(book, user.id);
       update({ downloaded: true });
-      Alert.alert(tx('ডাউনলোড সম্পন্ন', 'Downloaded'), tx('লাইব্রেরি থেকে অফলাইনে শুনতে পারবেন।', 'Play it offline from your Library.'));
+      AppAlert.alert(tx('ডাউনলোড সম্পন্ন', 'Downloaded'), tx('লাইব্রেরি থেকে অফলাইনে শুনতে পারবেন।', 'Play it offline from your Library.'));
     }, tx('ডাউনলোড ব্যর্থ', 'Download failed'));
   };
 
@@ -307,9 +300,18 @@ export function PlayerScreen() {
         onBack={() => navigation.goBack()}
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={[styles.artworkContainer, { width: artworkSize }]}>
-          <BookCover title={book.title} uri={book.cover_image_url} fill radius={Radius.xl} />
+      <View style={styles.scrollContent}>
+        <View
+          style={styles.artworkSlot}
+          onLayout={(e: LayoutChangeEvent) =>
+            setSlot({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })
+          }
+        >
+          {artworkSize >= 64 ? (
+            <View style={[styles.artworkContainer, { width: artworkSize }]}>
+              <BookCover title={book.title} uri={book.cover_image_url} fill radius={Radius.xl} />
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.infoRow}>
@@ -515,7 +517,7 @@ export function PlayerScreen() {
             })}
           </View>
         ) : null}
-      </ScrollView>
+      </View>
 
       <ModalBottomSheet visible={sheet === 'chapters'} onClose={() => setSheet(null)}>
         <View style={styles.modalContent}>
@@ -620,13 +622,21 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   scrollContent: {
+    flex: 1,
     width: '100%',
     maxWidth: 600,
     alignSelf: 'center',
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.xs,
-    paddingBottom: Spacing.xl,
+    paddingBottom: Spacing.md,
     alignItems: 'center',
+  },
+  artworkSlot: {
+    flex: 1,
+    minHeight: 0,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   artworkContainer: {
     aspectRatio: 1,
@@ -638,7 +648,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 10,
     elevation: 5,
-    marginVertical: Spacing.sm,
   },
   infoRow: {
     width: '100%',
@@ -775,7 +784,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginVertical: Spacing.md,
+    marginVertical: Spacing.sm,
   },
   toolButton: {
     width: 48,
@@ -835,7 +844,7 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginTop: Spacing.lg,
+    marginTop: Spacing.md,
   },
   actionButton: {
     flex: 1,

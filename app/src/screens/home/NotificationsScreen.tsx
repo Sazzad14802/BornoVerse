@@ -6,12 +6,13 @@
  */
 
 import React from 'react';
-import { Alert, Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { Linking, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader } from '../../components/AppHeader';
 import { StateView } from '../../components/StateView';
-import { AppNotification, notificationsApi } from '../../api/notifications';
+import { AppNotification, notificationText, notificationsApi } from '../../api/notifications';
 import { errorMessage } from '../../api/client';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useNotifications } from '../../contexts/NotificationsContext';
@@ -82,7 +83,7 @@ export function NotificationsScreen() {
     } catch (error) {
       inbox.setData(before ?? []);
       setUnreadCount(unread);
-      Alert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
+      AppAlert.alert(tx('সম্ভব হয়নি', 'Not possible'), errorMessage(error));
     }
   };
 
@@ -145,6 +146,7 @@ export function NotificationsScreen() {
         renderItem={({ item, index, section }) => {
           const look = appearance(item.kind);
           const isUnread = !item.read_at;
+          const text = notificationText(item, isEnglish);
           return (
             <Pressable
               onPress={() => open(item)}
@@ -156,7 +158,7 @@ export function NotificationsScreen() {
                 pressed && styles.pressed,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={`${isUnread ? tx('অপঠিত: ', 'Unread: ') : ''}${item.title}`}
+              accessibilityLabel={`${isUnread ? tx('অপঠিত: ', 'Unread: ') : ''}${text.title}`}
             >
               <View style={[styles.iconBox, { backgroundColor: look.background }]}>
                 <Ionicons name={look.icon} size={20} color={look.color} />
@@ -164,15 +166,11 @@ export function NotificationsScreen() {
               <View style={styles.itemText}>
                 <View style={styles.titleRow}>
                   <Text style={[styles.itemTitle, isUnread && styles.itemTitleUnread]} numberOfLines={2}>
-                    {item.title}
+                    {text.title}
                   </Text>
                   {isUnread ? <View style={styles.dot} /> : null}
                 </View>
-                {item.body ? (
-                  <Text style={styles.itemBody}>
-                    {item.body}
-                  </Text>
-                ) : null}
+                {text.body ? <Text style={styles.itemBody}>{text.body}</Text> : null}
                 <Text style={styles.itemTime}>{timeAgo(item.created_at, isEnglish)}</Text>
               </View>
             </Pressable>

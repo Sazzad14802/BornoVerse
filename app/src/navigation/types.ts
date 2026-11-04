@@ -67,6 +67,8 @@ export type ProfileStackParamList = SharedStackParamList & {
   /** Completed payments; each opens its details and invoice. */
   PaymentHistory: undefined;
   PaymentDetails: { orderId: string };
+  /** The publisher's channel dashboard. */
+  PublisherAnalytics: undefined;
 };
 
 export type MainTabParamList = {

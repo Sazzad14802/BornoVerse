@@ -5,7 +5,8 @@
  */
 
 import React, { useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppAlert } from '../../components/AppAlert';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
@@ -65,7 +66,7 @@ export function LibraryScreen() {
       else await loadAudiobook(book);
       navigation.navigate('Player', { audiobookId: book.id });
     } catch (error) {
-      Alert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
+      AppAlert.alert(tx('চালানো যায়নি', 'Could not play'), errorMessage(error));
     }
   };
 
@@ -79,7 +80,7 @@ export function LibraryScreen() {
       setPlaylistName('');
       setPlaylistSheet(false);
     } catch (error) {
-      Alert.alert(tx('প্লেলিস্ট', 'Playlist'), errorMessage(error));
+      AppAlert.alert(tx('প্লেলিস্ট', 'Playlist'), errorMessage(error));
     } finally {
       setCreating(false);
     }

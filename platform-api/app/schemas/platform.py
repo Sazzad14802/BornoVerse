@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Literal, Optional
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -58,10 +60,58 @@ class ReportInput(Input):
 
 class WithdrawalInput(Input):
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
-    destination: str = Field(min_length=5, max_length=150)
+    method: Literal["bkash", "nagad", "rocket", "bank"] = "bkash"
+    account_name: str = Field(default="", max_length=150)
+    account_number: str = Field(default="", max_length=50)
+    bank_name: str = Field(default="", max_length=150)
+    branch: str = Field(default="", max_length=150)
+    # Older clients send one free-text destination.
+    destination: Optional[str] = Field(default=None, max_length=150)
+
+    @model_validator(mode="after")
+    def payout_details(self):
+        import re
+        if self.destination and not self.account_number:
+            self.account_number = self.destination[:50]
+            return self
+        if self.method == "bank":
+            if not (self.bank_name.strip() and self.account_name.strip() and len(self.account_number.strip()) >= 6):
+                raise ValueError("Bank name, account name and account number are required")
+        elif not re.fullmatch(r"01[3-9]\d{8}", self.account_number.strip()):
+            raise ValueError("Enter a valid 11-digit mobile wallet number (01XXXXXXXXX)")
+        return self
+
+    def destination_text(self) -> str:
+        if self.destination and self.method == "bkash" and not self.account_name:
+            return self.destination
+        if self.method == "bank":
+            return f"Bank: {self.bank_name} · {self.account_name} · {self.account_number}"[:150]
+        return f"{self.method.capitalize()}: {self.account_number}"[:150]
+
+
+class WithdrawalDecision(Input):
+    action: Literal["approve", "reject", "complete"]
+    reason: str = Field(default="", max_length=2000)
+    # approve: when the money will be sent.
+    scheduled_for: Optional[datetime] = None
+    # complete: how and when it was sent.
+    payout_reference: str = Field(default="", max_length=150)
+    paid_at: Optional[datetime] = None
+    payout_note: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def required_fields(self):
+        if self.action == "reject" and len(self.reason.strip()) < 3:
+            raise ValueError("A reason is required to reject")
+        if self.action == "approve" and not self.scheduled_for:
+            raise ValueError("Set the date the payment will be sent")
+        if self.action == "complete" and len(self.payout_reference.strip()) < 3:
+            raise ValueError("Enter the transaction ID or reference of the payment")
+        return self
 
 class ProfileInput(Input):
-    full_name: str = Field(min_length=1, max_length=150)
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=150)
+    language: Optional[Literal["bn", "en"]] = None
 
 class HeartbeatInput(Input):
     position: int = Field(ge=0)

@@ -1,7 +1,7 @@
 /**
  * Catalog filters shared by Explore and Search: a filter icon (with the number
  * of active filters) that sits next to the search bar and opens a sheet with
- * Genre · Language · Access · Sort as wrapping chips, so nothing scrolls sideways.
+ * Genre · Language · Access · Sort as dropdowns (opening in place inside the sheet).
  * `FilterSummary` shows the active filters in one line with a Clear link.
  */
 
@@ -9,7 +9,6 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppButton } from './AppButton';
-import { ChipGroup } from './Chip';
 import { ModalBottomSheet, SheetScrollView } from './ModalBottomSheet';
 import { GENRES, LANGUAGES } from '../constants/genres';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -80,10 +79,14 @@ export function FilterButton({ value, onChange }: FilterProps) {
   const options = useFilterOptions();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [openField, setOpenField] = useState<keyof CatalogFilterValues | null>(null);
   const count = activeCount(value);
 
   useEffect(() => {
-    if (open) setDraft(value);
+    if (open) {
+      setDraft(value);
+      setOpenField(null);
+    }
   }, [open]);
 
   const set = (patch: Partial<CatalogFilterValues>) => setDraft((current) => ({ ...current, ...patch }));
@@ -120,20 +123,114 @@ export function FilterButton({ value, onChange }: FilterProps) {
           </View>
           <SheetScrollView maxHeight={440}>
             <View style={styles.groups}>
-              <Text style={styles.label}>{tx('ধরন', 'Genre')}</Text>
-              <ChipGroup value={draft.genre} onChange={(genre) => set({ genre })} options={options.genre} />
-              <Text style={styles.label}>{tx('ভাষা', 'Language')}</Text>
-              <ChipGroup value={draft.language} onChange={(language) => set({ language })} options={options.language} />
-              <Text style={styles.label}>{tx('অ্যাক্সেস', 'Access')}</Text>
-              <ChipGroup<'' | AccessTier> value={draft.tier} onChange={(tier) => set({ tier })} options={options.tier} />
-              <Text style={styles.label}>{tx('সাজান', 'Sort')}</Text>
-              <ChipGroup<CatalogSort> value={draft.sort} onChange={(sort) => set({ sort })} options={options.sort} />
+              <InlineSelect
+                label={tx('ধরন', 'Genre')}
+                icon="pricetags-outline"
+                value={draft.genre}
+                options={options.genre}
+                open={openField === 'genre'}
+                onToggle={() => setOpenField(openField === 'genre' ? null : 'genre')}
+                onChange={(genre) => set({ genre })}
+              />
+              <InlineSelect
+                label={tx('ভাষা', 'Language')}
+                icon="language-outline"
+                value={draft.language}
+                options={options.language}
+                open={openField === 'language'}
+                onToggle={() => setOpenField(openField === 'language' ? null : 'language')}
+                onChange={(language) => set({ language })}
+              />
+              <InlineSelect<'' | AccessTier>
+                label={tx('অ্যাক্সেস', 'Access')}
+                icon="lock-open-outline"
+                value={draft.tier}
+                options={options.tier}
+                open={openField === 'tier'}
+                onToggle={() => setOpenField(openField === 'tier' ? null : 'tier')}
+                onChange={(tier) => set({ tier })}
+              />
+              <InlineSelect<CatalogSort>
+                label={tx('সাজান', 'Sort')}
+                icon="swap-vertical-outline"
+                value={draft.sort}
+                options={options.sort}
+                open={openField === 'sort'}
+                onToggle={() => setOpenField(openField === 'sort' ? null : 'sort')}
+                onChange={(sort) => set({ sort })}
+              />
             </View>
           </SheetScrollView>
           <AppButton label={tx('ফলাফল দেখুন', 'Show results')} onPress={apply} />
         </View>
       </ModalBottomSheet>
     </>
+  );
+}
+
+/** A dropdown that opens in place: the chosen value, then the options below it. */
+function InlineSelect<T extends string>({
+  label,
+  icon,
+  value,
+  options,
+  open,
+  onToggle,
+  onChange,
+}: {
+  label: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  value: T;
+  options: { value: T; label: string }[];
+  open: boolean;
+  onToggle: () => void;
+  onChange: (value: T) => void;
+}) {
+  const selected = options.find((o) => o.value === value) ?? options[0];
+  return (
+    <View style={styles.select}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable
+        onPress={onToggle}
+        style={({ pressed }) => [styles.selectField, open && styles.selectFieldOpen, pressed && styles.pressed]}
+        accessibilityRole="combobox"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}: ${selected?.label ?? ''}`}
+      >
+        <Ionicons name={icon} size={18} color={Colors.textSecondary} />
+        <Text style={styles.selectValue} numberOfLines={1}>
+          {selected?.label}
+        </Text>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={Colors.textSecondary} />
+      </Pressable>
+      {open ? (
+        <View style={styles.options}>
+          {options.map((option, i) => {
+            const active = option.value === value;
+            return (
+              <Pressable
+                key={option.value || '_all'}
+                onPress={() => {
+                  onChange(option.value);
+                  onToggle();
+                }}
+                style={({ pressed }) => [
+                  styles.option,
+                  i < options.length - 1 && styles.optionDivider,
+                  active && styles.optionActive,
+                  pressed && styles.pressed,
+                ]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[styles.optionText, active && styles.optionTextActive]}>{option.label}</Text>
+                {active ? <Ionicons name="checkmark" size={18} color={Colors.primary} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -213,13 +310,64 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   groups: {
-    gap: Spacing.xs,
+    gap: Spacing.md,
   },
   label: {
     fontSize: FontSizes.sm,
     fontWeight: '700',
     color: Colors.textSecondary,
-    marginTop: Spacing.sm,
+  },
+  select: {
+    gap: 6,
+  },
+  selectField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    height: 48,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.surface,
+  },
+  selectFieldOpen: {
+    borderColor: Colors.primary,
+  },
+  selectValue: {
+    flex: 1,
+    fontSize: FontSizes.base,
+    fontWeight: '500',
+    color: Colors.textPrimary,
+  },
+  options: {
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.surface,
+    overflow: 'hidden',
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    paddingHorizontal: Spacing.md,
+  },
+  optionDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.surfaceBorder,
+  },
+  optionActive: {
+    backgroundColor: Colors.primarySurface,
+  },
+  optionText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    color: Colors.textPrimary,
+  },
+  optionTextActive: {
+    fontWeight: '700',
+    color: Colors.primary,
   },
   link: {
     fontSize: FontSizes.sm,
