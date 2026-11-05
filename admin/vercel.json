@@ -5,6 +5,14 @@
       "destination": "https://bornoverse-api.onrender.com/api/$1"
     },
     {
+      "source": "/privacy-policy",
+      "destination": "/privacy-policy.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy-policy.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
