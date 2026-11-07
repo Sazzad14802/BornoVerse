@@ -9,6 +9,10 @@
       "destination": "/privacy-policy.html"
     },
     {
+      "source": "/delete-account",
+      "destination": "/delete-account.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy-policy.html"
     },
