@@ -82,7 +82,7 @@ class GeminiService:
             self._genai_client = genai.Client(api_key=self.api_key)
         return self._genai_client
 
-    def extract_text_from_pdf(self, pdf_bytes: bytes, language: str = "bn") -> str:
+    def extract_text_from_pdf(self, pdf_bytes: bytes, language: str = "bn", mark_headings: bool = False) -> str:
         """
         Extracts high-fidelity Bengali and English text from PDF pages using Gemini Vision.
         If Gemini is unconfigured or encounters an error, seamlessly falls back to pypdf / EasyOCR.
@@ -110,6 +110,13 @@ class GeminiService:
                     "- Do not include any greeting, markdown backtick fences (```), commentary, or introductory notes.\n"
                     "- Output ONLY the exact transcribed text content."
                 )
+                if mark_headings:
+                    prompt += (
+                        "\n- If the page starts a new chapter or major section, put that chapter/section title on its "
+                        "own line starting with '## ' (for example '## অধ্যায় ১: শুরু' or '## Chapter 2'). Mark only real "
+                        "chapter or section titles, never running headers, page numbers or ordinary bold text.\n"
+                        "- Leave out running headers, footers and page numbers."
+                    )
 
                 # Determine MIME type: PDF or rendered image
                 mime_type = "application/pdf"

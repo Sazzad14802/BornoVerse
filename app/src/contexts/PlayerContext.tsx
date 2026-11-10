@@ -101,6 +101,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const finished = useRef(false);
   const loadEpoch = useRef(0);
   const advanceRef = useRef<() => void>(() => {});
+  /** The book is still being generated (its audio keeps growing). */
+  const generating = useRef(false);
+  const waitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const disposePlayer = useCallback(() => {
     subscription.current?.remove();
@@ -225,8 +228,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       const instance = createAudioPlayer({ uri }, { updateInterval: 500 });
       player.current = instance;
+      let lockScreenReady = false;
       subscription.current = instance.addListener('playbackStatusUpdate', (status: AudioStatus) => {
         if (player.current !== instance) return;
+        // Register the notification controls once the audio is loaded: the system
+        // reads the length then, so the notification's progress bar moves.
+        if (!lockScreenReady && status.isLoaded && status.duration > 0) {
+          lockScreenReady = true;
+          if (premiumRef.current) applyLockScreen(instance, book, chapter);
+        }
         setState((s) => ({
           ...s,
           isPlaying: status.playing,
@@ -240,8 +250,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-      if (premiumRef.current) applyLockScreen(instance, book, chapter);
-
       if (rate !== 1) instance.setPlaybackRate(rate);
       if (position > 0) instance.seekTo(position).catch(() => {});
       instance.play();
@@ -254,6 +262,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const manifest = await playbackApi.manifest(book.id, renew ? sessionId.current : undefined);
     sessionId.current = manifest.session_id;
     grantIssuedAt.current = Date.now();
+    generating.current = !!manifest.generating;
     return manifest.chapters as PlayerChapter[];
   }, []);
 
@@ -339,14 +348,62 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [fetchManifest, offlineExpired, startChapter, stop, syncProgress, fail],
   );
 
+  /**
+   * While a book is still being generated, newly finished pages are added to the end
+   * of the current chapter (or start new chapters). When playback reaches the end of
+   * what is ready, fetch the manifest again and carry on from exactly that point;
+   * if nothing new is ready yet, wait and check again.
+   */
+  const continueGenerated = useCallback(
+    async (epoch: number, attempt = 0) => {
+      const s = stateRef.current;
+      if (!s.audiobook || s.isOffline || epoch !== loadEpoch.current) return;
+      const current = s.chapters[s.currentChapterIndex];
+      const reachedEnd = Math.max(s.positionSeconds, current?.duration_seconds ?? 0);
+      try {
+        const chapters = await fetchManifest(s.audiobook, true);
+        if (epoch !== loadEpoch.current) return;
+        const index = chapters.findIndex((c) => c.id === current?.id);
+        if (index >= 0 && chapters[index].duration_seconds > reachedEnd + 0.5) {
+          startChapter(s.audiobook, chapters, index, reachedEnd, false); // the same chapter grew
+          return;
+        }
+        if (index >= 0 && index + 1 < chapters.length) {
+          startChapter(s.audiobook, chapters, index + 1, 0, false); // a new chapter started
+          return;
+        }
+        setState((st) => ({ ...st, chapters }));
+      } catch {
+        // Try again shortly.
+      }
+      if (generating.current && attempt < 120) {
+        setState((st) => ({ ...st, isLoading: true }));
+        waitTimer.current = setTimeout(() => continueGenerated(epoch, attempt + 1), 5000);
+      } else {
+        setState((st) => ({ ...st, isLoading: false }));
+        syncProgress();
+      }
+    },
+    [fetchManifest, startChapter, syncProgress],
+  );
+
   advanceRef.current = () => {
     const s = stateRef.current;
     if (s.currentChapterIndex + 1 < s.chapters.length) {
       selectChapter(s.currentChapterIndex + 1).catch(() => {});
+    } else if (generating.current && !s.isOffline) {
+      continueGenerated(loadEpoch.current);
     } else {
       syncProgress();
     }
   };
+
+  useEffect(
+    () => () => {
+      if (waitTimer.current) clearTimeout(waitTimer.current);
+    },
+    [],
+  );
 
   // Periodic progress sync + listening heartbeat while playing.
   useEffect(() => {

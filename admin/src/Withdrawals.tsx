@@ -1,9 +1,9 @@
 // Publisher withdrawals: payout details, approval with a payment date, and the
 // record of the manual payment (method, reference, date). Money is sent by hand
 // outside the system; this page keeps track of when and how it was sent.
-import React, { useEffect, useState } from "react";
-import { request } from "./api";
-import { Modal, Row, dateTime, memberId } from "./ui";
+import React, { useEffect, useRef, useState } from "react";
+import { query, request } from "./api";
+import { FilterBar, FilterField, Filters, Modal, Row, dateTime, memberId, useDebounced } from "./ui";
 
 const STATUS: Record<string, string> = {
   pending: "Pending",
@@ -23,39 +23,66 @@ const METHODS: Record<string, string> = {
 const money = (value: unknown) => `৳${Number(value ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
 const today = () => new Date().toISOString().slice(0, 10);
 
-export function WithdrawalsPage({ onChanged }: { onChanged: () => void }) {
-  const [status, setStatus] = useState("pending");
+const FILTERS: FilterField[] = [
+  { key: "q", kind: "search", placeholder: "Search publisher, U-0001, account or reference…" },
+  {
+    key: "status",
+    kind: "select",
+    label: "Status",
+    options: [
+      ["pending", "Pending review"],
+      ["approved", "Approved, not paid yet"],
+      ["completed", "Paid"],
+      ["rejected", "Rejected"],
+      ["", "All requests"],
+    ],
+  },
+  { key: "method", kind: "select", label: "Method", options: [["", "Any"], ...Object.entries(METHODS)] },
+  { kind: "dates" },
+  {
+    key: "sort",
+    kind: "select",
+    label: "Sort",
+    options: [
+      ["newest", "Newest first"],
+      ["oldest", "Oldest first"],
+    ],
+  },
+];
+
+export function WithdrawalsPage({ onChanged, reloadKey = 0 }: { onChanged: () => void; reloadKey?: number }) {
+  const [filters, setFilters] = useState<Filters>({ status: "pending" });
+  const debounced = useDebounced(filters, 300);
+  const [page, setPage] = useState(1);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<Row | null>(null);
+  const sequence = useRef(0);
 
   async function load() {
+    const current = ++sequence.current;
     setError("");
     try {
-      const all: Row[] = await request("/admin/withdrawals");
-      setRows(status ? all.filter((r) => r.status === status) : all);
+      const result: Row[] = await request(`/admin/withdrawals${query({ ...debounced, page })}`);
+      if (current === sequence.current) setRows(result);
     } catch (e) {
-      setError((e as Error).message);
+      if (current === sequence.current) setError((e as Error).message);
     }
   }
   useEffect(() => {
     load();
-  }, [status]);
+  }, [debounced, page, reloadKey]);
 
   return (
     <>
-      <div className="toolbar">
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="pending">Pending review</option>
-            <option value="approved">Approved, not paid yet</option>
-            <option value="completed">Paid</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All requests</option>
-          </select>
-        </label>
-      </div>
+      <FilterBar
+        fields={FILTERS}
+        values={filters}
+        onChange={(next) => {
+          setFilters(next);
+          setPage(1);
+        }}
+      />
       {error && (
         <div role="alert" className="error">
           {error}
@@ -91,7 +118,10 @@ export function WithdrawalsPage({ onChanged }: { onChanged: () => void }) {
               rows.map((r) => (
                 <tr key={r.id}>
                   <td>{dateTime(r.created_at)}</td>
-                  <td className="mono">{memberId(r.member)}</td>
+                  <td>
+                    <span className="mono">{memberId(r.member)}</span> {r.publisher?.username}
+                    {r.publisher?.email && <div className="subtle">{r.publisher.email}</div>}
+                  </td>
                   <td>
                     <strong>{money(r.amount)}</strong>
                   </td>
@@ -116,7 +146,9 @@ export function WithdrawalsPage({ onChanged }: { onChanged: () => void }) {
                   </td>
                   <td>
                     <div className="actions">
-                      <button onClick={() => setOpen(r)}>Open</button>
+                      <button className="info" onClick={() => setOpen(r)}>
+                        Open
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -125,6 +157,17 @@ export function WithdrawalsPage({ onChanged }: { onChanged: () => void }) {
           </tbody>
         </table>
       </div>
+      {rows && (
+        <div className="pagination">
+          <button className="secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>
+            Previous
+          </button>
+          <span>Page {page}</span>
+          <button className="secondary" disabled={rows.length < 50} onClick={() => setPage(page + 1)}>
+            Next
+          </button>
+        </div>
+      )}
       {open && (
         <WithdrawalCase
           row={open}
@@ -234,13 +277,13 @@ function WithdrawalCase({ row, close, onChanged }: { row: Row; close: () => void
         <div className="modal-actions">
           {row.status === "pending" && (
             <>
-              <button className="secondary" onClick={() => setPane("reject")}>
+              <button className="danger" onClick={() => setPane("reject")}>
                 Reject
               </button>
-              <button onClick={() => setPane("approve")}>Approve</button>
+              <button className="success" onClick={() => setPane("approve")}>Approve</button>
             </>
           )}
-          {row.status === "approved" && <button onClick={() => setPane("complete")}>Mark as paid</button>}
+          {row.status === "approved" && <button className="success" onClick={() => setPane("complete")}>Mark as paid</button>}
         </div>
       )}
 
@@ -322,7 +365,7 @@ function WithdrawalCase({ row, close, onChanged }: { row: Row; close: () => void
             <button type="button" className="secondary" onClick={() => setPane(null)}>
               Cancel
             </button>
-            <button disabled={busy || reason.trim().length < 3}>Reject</button>
+            <button className="danger" disabled={busy || reason.trim().length < 3}>Reject</button>
           </div>
         </form>
       )}

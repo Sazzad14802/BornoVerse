@@ -1,5 +1,5 @@
 diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
-index 196a5d5..dc35a58 100644
+index 196a5d5..e09033f 100644
 --- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 +++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/AudioControlsService.kt
 @@ -90,6 +90,8 @@ class AudioControlsService : MediaSessionService() {
@@ -11,7 +11,23 @@ index 196a5d5..dc35a58 100644
        }
      }
  
-@@ -192,6 +194,17 @@ class AudioControlsService : MediaSessionService() {
+@@ -183,15 +185,31 @@ class AudioControlsService : MediaSessionService() {
+       .setLargeIcon(currentArtwork)
+       .setContentIntent(buildContentIntent())
+       .setAutoCancel(false)
++      .setOnlyAlertOnce(true)
++      .setSilent(true)
++      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+       .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+ 
+     val style = MediaStyleNotificationHelper.MediaStyle(session)
+ 
+-    // Older Android system UI expects explicit notification actions for transport controls.
+-    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
++    // BornoVerse: always add explicit actions. Older Android needs them, and several
++    // manufacturer skins (MIUI/HyperOS, ColorOS, some dark notification shades) draw the
++    // media notification from these actions instead of from the session's buttons.
++    run {
        val compactViewIndices = mutableListOf<Int>()
        var currentIndex = 0
  
@@ -29,7 +45,7 @@ index 196a5d5..dc35a58 100644
        if (currentOptions?.showSeekBackward == true) {
          builder.addAction(
            NotificationCompat.Action(
-@@ -200,7 +213,6 @@ class AudioControlsService : MediaSessionService() {
+@@ -200,7 +218,6 @@ class AudioControlsService : MediaSessionService() {
              buildActionPendingIntent(ACTION_SEEK_BACKWARD)
            )
          )
@@ -37,7 +53,7 @@ index 196a5d5..dc35a58 100644
          currentIndex++
        }
  
-@@ -226,8 +238,17 @@ class AudioControlsService : MediaSessionService() {
+@@ -226,8 +243,17 @@ class AudioControlsService : MediaSessionService() {
              buildActionPendingIntent(ACTION_SEEK_FORWARD)
            )
          )
@@ -56,7 +72,7 @@ index 196a5d5..dc35a58 100644
  
        style.setShowActionsInCompactView(*compactViewIndices.toIntArray())
      }
-@@ -240,17 +261,16 @@ class AudioControlsService : MediaSessionService() {
+@@ -240,17 +266,16 @@ class AudioControlsService : MediaSessionService() {
      val session = mediaSession ?: return
      val mediaButtons = mutableListOf<CommandButton>()
  
@@ -84,7 +100,7 @@ index 196a5d5..dc35a58 100644
  
      // Add play/pause button (always present)
      mediaButtons.add(
-@@ -262,14 +282,31 @@ class AudioControlsService : MediaSessionService() {
+@@ -262,14 +287,31 @@ class AudioControlsService : MediaSessionService() {
          .build()
      )
  
@@ -119,7 +135,7 @@ index 196a5d5..dc35a58 100644
            .build()
        )
      }
-@@ -510,6 +547,16 @@ class AudioControlsService : MediaSessionService() {
+@@ -510,6 +552,16 @@ class AudioControlsService : MediaSessionService() {
      notificationManager.cancel(notificationId)
    }
  
@@ -136,7 +152,7 @@ index 196a5d5..dc35a58 100644
    override fun onDestroy() {
      super.onDestroy()
  
-@@ -559,6 +606,18 @@ class AudioControlsService : MediaSessionService() {
+@@ -559,6 +611,18 @@ class AudioControlsService : MediaSessionService() {
      const val ACTION_SEEK_FORWARD = "expo.modules.audio.action.SEEK_FORWARD"
      const val ACTION_SEEK_BACKWARD = "expo.modules.audio.action.SEEK_BACKWARD"
  
@@ -176,4 +192,47 @@ index 839aaef..b7c80c2 100644
 +      AudioControlsService.ACTION_PREVIOUS -> session.player.seekTo(0)
      }
      return super.onCustomCommand(session, controller, command, args)
+   }
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/MetadataInjectingPlayer.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/MetadataInjectingPlayer.kt
+index 18203a3..36f18b7 100644
+--- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/MetadataInjectingPlayer.kt
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/service/MetadataInjectingPlayer.kt
+@@ -3,6 +3,7 @@ package expo.modules.audio.service
+ import android.os.Handler
+ import android.os.Looper
+ import androidx.core.net.toUri
++import androidx.media3.common.C
+ import androidx.media3.common.FlagSet
+ import androidx.media3.common.ForwardingPlayer
+ import androidx.media3.common.MediaMetadata
+@@ -45,6 +46,11 @@ internal class MetadataInjectingPlayer(
+       .setAlbumTitle(metadata?.albumTitle)
+       .setArtworkUri(metadata?.artworkUrl?.toString()?.toUri())
+       .setArtworkData(null, null)
++      // BornoVerse: publish the length so system media controls draw a moving progress bar.
++      .apply {
++        val duration = super.getDuration()
++        if (duration != C.TIME_UNSET && duration > 0) setDurationMs(duration)
++      }
+       .build()
+   }
+ 
+@@ -87,6 +93,18 @@ internal class MetadataInjectingPlayer(
+     }
+ 
+     override fun onEvents(player: Player, events: Player.Events) {
++      // BornoVerse: the duration is only known once the media is ready. Re-announce the
++      // metadata then, so the session (and the notification's progress bar) picks it up.
++      if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED) &&
++        !events.contains(Player.EVENT_MEDIA_METADATA_CHANGED)
++      ) {
++        val flags = FlagSet.Builder()
++        for (i in 0 until events.size()) flags.add(events.get(i))
++        flags.add(Player.EVENT_MEDIA_METADATA_CHANGED)
++        listener.onMediaMetadataChanged(this@MetadataInjectingPlayer.mediaMetadata)
++        listener.onEvents(this@MetadataInjectingPlayer, Player.Events(flags.build()))
++        return
++      }
+       listener.onEvents(this@MetadataInjectingPlayer, events)
+     }
    }

@@ -122,7 +122,10 @@ export function PlayerScreen() {
     const target = info.data?.book;
     if (!requestedId || !target || target.id !== requestedId) return;
     if (audiobook?.id === requestedId || startedFor.current === requestedId) return;
-    if (isLocked || target.status !== 'COMPLETED') return;
+    // The owner can start a book that is still being generated: ready pages play
+    // and newly generated ones follow on without a break.
+    const ownGenerating = target.owner_id === user?.id && target.status === 'PROCESSING' && target.duration_seconds > 0;
+    if (isLocked || (target.status !== 'COMPLETED' && !ownGenerating)) return;
     startedFor.current = requestedId;
     setOpenError(null);
     player.loadAudiobook(target).catch((e) => setOpenError(errorMessage(e)));

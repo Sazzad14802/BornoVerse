@@ -225,6 +225,8 @@ async def settle(db, user_id, order_id, outcome: str, **details) -> Order:
                             order_id=order.id)
     order.status = outcome
     order.updated_at = datetime.now(timezone.utc)
+    if details.get("card_type"):
+        order.method = str(details["card_type"])[:60]
     db.add(PaymentEvent(order_id=order.id, status=outcome))
     audit(db, account, "payment." + outcome, order.id, amount=str(order.amount), **details)
     await db.commit()
@@ -278,7 +280,8 @@ async def sslcommerz_validate_and_settle(db, val_id: str) -> Optional[Order]:
         return order
     try:
         return await settle(db, order.user_id, order.id, "success",
-                            gateway="sslcommerz", val_id=val_id, bank_tran_id=str(result.get("bank_tran_id", "")))
+                            gateway="sslcommerz", val_id=val_id, bank_tran_id=str(result.get("bank_tran_id", "")),
+                            card_type=str(result.get("card_type") or ""), card_issuer=str(result.get("card_issuer") or ""))
     except HTTPException:
         await db.rollback()
         return await db.get(Order, order_id)
@@ -296,17 +299,163 @@ def allocate(pool, counts):
         result[key] += 1
     return {key: Decimal(value) / 100 for key, value in result.items()}
 
+# ── Daily publisher earnings ────────────────────────────────────────────────
+#
+# Premium income is recognised day by day over the period it pays for (a 150 BDT
+# one-month plan bought on 3 Nov counts about 5 BDT on each day until 3 Dec).
+# Every finished day (Asia/Dhaka) the publisher share of that day's income is
+# split by that day's eligible Premium listens and credited to the publishers'
+# balances, so earnings grow daily and can be withdrawn at any time. A day
+# without listens keeps its pool as an unallocated liability. Months closed
+# before daily earnings started keep their monthly allocation.
+
+DHAKA = "Asia/Dhaka"
+
+
+def today_dhaka() -> str:
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo(DHAKA)).strftime("%Y-%m-%d")
+
+
+def day_bounds(day: str) -> tuple[datetime, datetime]:
+    from zoneinfo import ZoneInfo
+    start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=ZoneInfo(DHAKA))
+    return start, start + timedelta(days=1)
+
+
+async def daily_start(db) -> str:
+    """First day covered by daily earnings: the first day of the month it was switched on
+    (that month was never closed monthly). Stored so it never moves."""
+    from app.models.platform import Setting
+    row = await db.get(Setting, "earnings")
+    if row and row.value.get("daily_from"):
+        return row.value["daily_from"]
+    value = today_dhaka()[:8] + "01"
+    closed = set((await db.scalars(select(FinancialSnapshot.month))).all())
+    # Never re-cover a month that was already closed and paid monthly.
+    while value[:7] in closed:
+        value = add_months(datetime.strptime(value, "%Y-%m-%d"), 1).strftime("%Y-%m-%d")
+    db.add(Setting(key="earnings", value={"daily_from": value}))
+    await db.flush()
+    return value
+
+
+async def recognised_revenue(db, day: str) -> Decimal:
+    """Subscription income that belongs to `day`: each paid order spread evenly over its period."""
+    start, end = day_bounds(day)
+    orders = (await db.scalars(select(Order).where(
+        Order.status == "success", Order.kind == "subscription", Order.months > 0,
+        Order.updated_at < end, Order.updated_at >= add_months(start, -13)))).all()
+    if not orders:
+        return Decimal("0.00")
+    deductions = dict((await db.execute(select(FinancialAdjustment.order_id, func.sum(FinancialAdjustment.amount))
+                                        .where(FinancialAdjustment.order_id.in_([o.id for o in orders]))
+                                        .group_by(FinancialAdjustment.order_id))).all())
+    from zoneinfo import ZoneInfo
+    total = Decimal(0)
+    for order in orders:
+        paid_day = utc(order.updated_at).astimezone(ZoneInfo(DHAKA)).date()
+        first = datetime.combine(paid_day, datetime.min.time())
+        days = max(1, (add_months(first, order.months) - first).days)
+        offset = (start.date() - paid_day).days
+        if 0 <= offset < days:
+            total += (Decimal(order.amount) - Decimal(deductions.get(order.id) or 0)) / days
+    return max(Decimal(0), total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+async def daily_counts(db, day: str) -> dict:
+    from app.models.platform import DailyListen
+    return dict((await db.execute(select(DailyListen.publisher_id, func.count()).where(
+        DailyListen.day == day).group_by(DailyListen.publisher_id))).all())
+
+
+async def close_day(db, day: str):
+    """Credit one finished day's publisher pool to the publishers' balances (idempotent)."""
+    from app.models.platform import DailyEarning, Setting
+    if day >= today_dhaka():
+        raise HTTPException(400, "Only a finished day can be closed")
+    await db.execute(select(Setting).where(Setting.key == "policy").with_for_update())
+    prior = await db.get(DailyEarning, day)
+    if prior:
+        return prior
+    policy = await configuration(db)
+    revenue = await recognised_revenue(db, day)
+    pool = (revenue * Decimal(policy["publisher_percent"]) / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    counts = await daily_counts(db, day)
+    allocations = allocate(pool, counts)
+    row = DailyEarning(day=day, revenue=revenue, publisher_pool=pool,
+                       allocated=sum(allocations.values(), Decimal(0)), listens=sum(counts.values()))
+    db.add(row)
+    for publisher, amount in allocations.items():
+        if amount > 0:
+            db.add(Ledger(publisher_id=publisher, month=day[:7], amount=amount, kind="earning",
+                          reference=f"earning:{day}:{publisher}"))
+    await db.commit()
+    return row
+
+
+async def close_due_days(db) -> list[str]:
+    """Close every finished day since daily earnings started (runs automatically)."""
+    from app.models.platform import DailyEarning
+    first = await daily_start(db)
+    await db.commit()
+    today = today_dhaka()
+    closed = set((await db.scalars(select(DailyEarning.day).where(DailyEarning.day >= first))).all())
+    done = []
+    day = datetime.strptime(first, "%Y-%m-%d")
+    for _ in range(800):  # bounded catch-up
+        key = day.strftime("%Y-%m-%d")
+        if key >= today:
+            break
+        if key not in closed:
+            await close_day(db, key)
+            done.append(key)
+        day += timedelta(days=1)
+    return done
+
+
+async def today_estimate(db, publisher_id) -> dict:
+    """Today so far: what this publisher would be credited if the day ended now."""
+    from app.models.platform import DailyListen
+    day = today_dhaka()
+    policy = await configuration(db)
+    revenue = await recognised_revenue(db, day)
+    pool = revenue * Decimal(policy["publisher_percent"]) / 100
+    counts = await daily_counts(db, day)
+    total, mine = sum(counts.values()), counts.get(publisher_id, 0)
+    estimate = (pool * mine / total).quantize(Decimal("0.01"), rounding=ROUND_DOWN) if total else Decimal("0.00")
+    return {"day": day, "estimated": str(estimate), "listens": mine, "all_listens": total}
+
+
 async def close_month(db, actor, month):
     from zoneinfo import ZoneInfo
     import re
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month) or month >= month_now():
         raise HTTPException(400, "Only a completed calendar month can be closed")
     # Serialize closes using the existing policy row.
-    from app.models.platform import Setting
+    from app.models.platform import Setting, DailyEarning
     await db.execute(select(Setting).where(Setting.key == "policy").with_for_update())
     prior = await db.get(FinancialSnapshot, month)
     if prior:
         return prior
+    if month >= (await daily_start(db))[:7]:
+        # Daily earnings already credited this month's publishers; the snapshot only sums them up.
+        await close_due_days(db)
+        await db.execute(select(Setting).where(Setting.key == "policy").with_for_update())
+        prior = await db.get(FinancialSnapshot, month)
+        if prior:
+            return prior
+        days = (await db.scalars(select(DailyEarning).where(DailyEarning.day.like(f"{month}-%")))).all()
+        revenue = sum((d.revenue for d in days), Decimal(0))
+        pool = sum((d.publisher_pool for d in days), Decimal(0))
+        allocated = sum((d.allocated for d in days), Decimal(0))
+        policy = await configuration(db)
+        snapshot = FinancialSnapshot(month=month, revenue=revenue, publisher_pool=pool, platform_share=revenue - pool,
+                                     policy=policy | {"unallocated": str(pool - allocated), "mode": "daily"})
+        db.add(snapshot)
+        audit(db, actor, "finance.close_month", month, revenue=str(revenue), pool=str(pool), mode="daily")
+        await db.commit()
+        return snapshot
     start = datetime.strptime(month, "%Y-%m").replace(tzinfo=ZoneInfo("Asia/Dhaka"))
     end = add_months(start, 1)
     revenue = await db.scalar(select(func.coalesce(func.sum(Order.amount), 0)).where(
@@ -337,7 +486,9 @@ def previous_month(month: str) -> str:
 
 async def close_due_months(db) -> list[str]:
     """Close every completed month that has listens or revenue and is not closed yet
-    (runs automatically; admins can still close a month by hand)."""
+    (runs automatically; admins can still close a month by hand). Finished days are
+    credited first, so balances grow every day."""
+    await close_due_days(db)
     current = month_now()
     months = set((await db.scalars(select(EligibleView.month).where(EligibleView.month < current).distinct())).all())
     months.add(previous_month(current))
@@ -352,19 +503,17 @@ async def close_due_months(db) -> list[str]:
 
 
 async def month_estimate(db, publisher_id) -> dict:
-    """This month so far: the same split close_month will make, with today's numbers."""
-    from zoneinfo import ZoneInfo
+    """This month so far: earnings already credited day by day, plus today's running estimate."""
     month = month_now()
-    start = datetime.strptime(month, "%Y-%m").replace(tzinfo=ZoneInfo("Asia/Dhaka"))
-    revenue = await db.scalar(select(func.coalesce(func.sum(Order.amount), 0)).where(
-        Order.status == "success", Order.kind == "subscription", Order.updated_at >= start))
     policy = await configuration(db)
-    pool = Decimal(revenue) * Decimal(policy["publisher_percent"]) / 100
+    credited = await db.scalar(select(func.coalesce(func.sum(Ledger.amount), 0)).where(
+        Ledger.publisher_id == publisher_id, Ledger.kind == "earning", Ledger.month == month)) or Decimal(0)
+    today = await today_estimate(db, publisher_id)
     total = await db.scalar(select(func.count()).select_from(EligibleView).where(EligibleView.month == month)) or 0
     mine = await db.scalar(select(func.count()).select_from(EligibleView).where(
         EligibleView.month == month, EligibleView.publisher_id == publisher_id)) or 0
-    estimate = (pool * mine / total).quantize(Decimal("0.01"), rounding=ROUND_DOWN) if total else Decimal("0.00")
-    return {"month": month, "estimated": str(estimate), "eligible_views": mine, "all_eligible_views": total,
+    return {"month": month, "estimated": str(Decimal(credited) + Decimal(today["estimated"])),
+            "credited": str(credited), "today": today, "eligible_views": mine, "all_eligible_views": total,
             "publisher_percent": policy["publisher_percent"]}
 
 

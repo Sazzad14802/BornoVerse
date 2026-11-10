@@ -19,9 +19,48 @@ from app.services import billing, moderation_service
 from app.services.notification_service import deliver, notify
 
 router = APIRouter()
+PAGE = 50
 
 def record(row):
     return jsonable_encoder({c.name: getattr(row, c.name) for c in row.__table__.columns})
+
+def date_range(column, date_from: str | None, date_to: str | None) -> list:
+    """Conditions for an inclusive calendar-date range (YYYY-MM-DD, Asia/Dhaka) on a timestamp column."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    conditions = []
+    for value, upper in ((date_from, False), (date_to, True)):
+        if not value:
+            continue
+        try:
+            day = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Asia/Dhaka"))
+        except ValueError:
+            raise HTTPException(422, "Dates must look like 2026-11-10")
+        conditions.append(column < day + timedelta(days=1) if upper else column >= day)
+    return conditions
+
+def serial_number(q: str, prefix: str) -> int | None:
+    """'U-0012', 'u12', '12' -> 12 (the prefix letter is optional)."""
+    match = re.fullmatch(rf"(?:{prefix})?-?0*(\d{{1,9}})", q.strip(), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+def member_conditions(q: str) -> list:
+    """Match a member by username, email or member number."""
+    matches = [User.email.ilike(f"%{q}%"), User.username.ilike(f"%{q}%")]
+    number = serial_number(q, "u")
+    if number is not None:
+        matches.append(User.serial == number)
+    return matches
+
+async def people(db, ids) -> dict:
+    ids = {i for i in ids if i}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(User.id, User.serial, User.username, User.email).where(User.id.in_(ids)))).all()
+    return {r.id: {"id": str(r.id), "serial": r.serial, "username": r.username, "email": r.email} for r in rows}
+
+def ordering(column, sort: str):
+    return column.asc() if sort == "oldest" else column.desc()
 
 async def with_member_numbers(db, rows, key: str):
     """Records plus the member number (serial) of the user referenced by `key`."""
@@ -55,12 +94,10 @@ async def summary(db: DatabaseDep, admin: AdminDep):
 
 @router.get("/users")
 async def users(db: DatabaseDep, admin: AdminDep, q: str = "", account_type: str | None = None,
-                suspended: bool | None = None, page: int = Query(1, ge=1)):
-    matches = [User.email.ilike(f"%{q}%"), User.username.ilike(f"%{q}%")]
-    number = re.fullmatch(r"[uU]?-?0*(\d{1,9})", q.strip())
-    if number:
-        matches.append(User.serial == int(number.group(1)))
-    query = select(User).where(or_(*matches))
+                suspended: bool | None = None, publisher_status: str | None = None, premium: bool | None = None,
+                published: bool | None = None, date_from: str | None = None, date_to: str | None = None,
+                sort: str = "newest", page: int = Query(1, ge=1)):
+    query = select(User).where(or_(*member_conditions(q)), *date_range(User.created_at, date_from, date_to))
     if account_type == "publisher":
         # Publishers are users with an active publisher verification.
         query = query.where(User.account_type == "user", User.publisher_status == "active")
@@ -68,7 +105,22 @@ async def users(db: DatabaseDep, admin: AdminDep, q: str = "", account_type: str
         query = query.where(User.account_type == account_type)
     if suspended is not None:
         query = query.where(User.suspended == suspended)
-    return [UserRead.model_validate(u) for u in (await db.scalars(query.order_by(User.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+    if publisher_status:
+        query = query.where(User.publisher_status == publisher_status)
+    if premium is not None:
+        active = User.premium_until > datetime.now(timezone.utc)
+        query = query.where(active if premium else or_(User.premium_until.is_(None), ~active))
+    if published is not None:
+        owners = select(Audiobook.owner_id).where(Audiobook.publication_status == "published")
+        query = query.where(User.id.in_(owners) if published else User.id.not_in(owners))
+    order = User.username.asc() if sort == "username" else ordering(User.created_at, sort)
+    rows = (await db.scalars(query.order_by(order).offset((page-1)*PAGE).limit(PAGE))).all()
+    books = dict((await db.execute(select(Audiobook.owner_id, func.count()).where(
+        Audiobook.owner_id.in_([u.id for u in rows]), Audiobook.publication_status == "published")
+        .group_by(Audiobook.owner_id))).all()) if rows else {}
+    now = datetime.now(timezone.utc)
+    return [{**UserRead.model_validate(u).model_dump(mode="json"), "published_books": books.get(u.id, 0),
+             "premium": bool(u.premium_until and billing.utc(u.premium_until) > now)} for u in rows]
 
 @router.post("/users/{id}/decision")
 async def user_decision(id: UUID, data: Decision, db: DatabaseDep, admin: AdminDep):
@@ -84,8 +136,16 @@ async def user_decision(id: UUID, data: Decision, db: DatabaseDep, admin: AdminD
     return UserRead.model_validate(user)
 
 @router.get("/applications")
-async def applications(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    rows = (await db.scalars(select(PublisherApplication).order_by(PublisherApplication.created_at.desc()).offset((page-1)*50).limit(50))).all()
+async def applications(db: DatabaseDep, admin: AdminDep, q: str = "", status: str = "", date_from: str | None = None,
+                       date_to: str | None = None, sort: str = "newest", page: int = Query(1, ge=1)):
+    query = select(PublisherApplication).where(*date_range(PublisherApplication.created_at, date_from, date_to))
+    if status:
+        query = query.where(PublisherApplication.status == status)
+    if q.strip():
+        query = query.where(or_(PublisherApplication.legal_name.ilike(f"%{q}%"),
+                                PublisherApplication.user_id.in_(select(User.id).where(or_(*member_conditions(q))))))
+    rows = (await db.scalars(query.order_by(ordering(PublisherApplication.created_at, sort))
+                             .offset((page-1)*PAGE).limit(PAGE))).all()
     return await with_member_numbers(db, rows, "user_id")
 
 @router.get("/applications/{id}/document")
@@ -124,12 +184,62 @@ async def application_decision(id: UUID, data: Decision, db: DatabaseDep, admin:
     return record(row)
 
 @router.get("/audiobooks")
-async def books(db: DatabaseDep, admin: AdminDep, q: str = "", page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(Audiobook).where(Audiobook.title.ilike(f"%{q}%")).order_by(Audiobook.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+async def books(db: DatabaseDep, admin: AdminDep, q: str = "", owner: str = "", access_tier: str = "",
+                status: str = "", publication_status: str = "", visibility: str = "", moderated: bool | None = None,
+                language: str = "", in_channel: bool | None = None, date_from: str | None = None,
+                date_to: str | None = None, sort: str = "newest", page: int = Query(1, ge=1)):
+    query = select(Audiobook).where(*date_range(Audiobook.created_at, date_from, date_to))
+    if q.strip():
+        query = query.where(or_(Audiobook.title.ilike(f"%{q}%"), Audiobook.author.ilike(f"%{q}%")))
+    if owner.strip():
+        query = query.where(Audiobook.owner_id.in_(select(User.id).where(or_(*member_conditions(owner)))))
+    for column, value in ((Audiobook.access_tier, access_tier), (Audiobook.publication_status, publication_status),
+                          (Audiobook.language, language)):
+        if value:
+            query = query.where(column == value)
+    from app.models import AudiobookStatus, AudiobookVisibility
+    try:
+        if status:
+            query = query.where(Audiobook.status == AudiobookStatus(status))
+        if visibility:
+            query = query.where(Audiobook.visibility == AudiobookVisibility(visibility))
+    except ValueError:
+        raise HTTPException(422, "Unknown status or visibility")
+    if moderated is not None:
+        query = query.where(Audiobook.moderated == moderated)
+    if in_channel is not None:
+        query = query.where(Audiobook.channel_id.is_not(None) if in_channel else Audiobook.channel_id.is_(None))
+    order = {"title": Audiobook.title.asc(), "longest": Audiobook.duration_seconds.desc()}.get(
+        sort, ordering(Audiobook.created_at, sort))
+    rows = (await db.scalars(query.order_by(order).offset((page-1)*PAGE).limit(PAGE))).all()
+    owners = await people(db, [r.owner_id for r in rows])
+    channel_ids = {r.channel_id for r in rows if r.channel_id}
+    names = dict((await db.execute(select(Channel.id, Channel.name).where(Channel.id.in_(channel_ids)))).all()) if channel_ids else {}
+    return [{**record(r), "owner": owners.get(r.owner_id), "channel_name": names.get(r.channel_id)} for r in rows]
 
 @router.get("/channels")
-async def channels(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(Channel).order_by(Channel.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+async def channels(db: DatabaseDep, admin: AdminDep, q: str = "", owner: str = "", moderated: bool | None = None,
+                   date_from: str | None = None, date_to: str | None = None, sort: str = "newest",
+                   page: int = Query(1, ge=1)):
+    from app.models.social import ChannelFollow
+    query = select(Channel).where(*date_range(Channel.created_at, date_from, date_to))
+    if q.strip():
+        number = serial_number(q, "c")
+        query = query.where(or_(Channel.name.ilike(f"%{q}%"), *([Channel.serial == number] if number is not None else [])))
+    if owner.strip():
+        query = query.where(Channel.owner_id.in_(select(User.id).where(or_(*member_conditions(owner)))))
+    if moderated is not None:
+        query = query.where(Channel.moderated == moderated)
+    order = Channel.name.asc() if sort == "name" else ordering(Channel.created_at, sort)
+    rows = (await db.scalars(query.order_by(order).offset((page-1)*PAGE).limit(PAGE))).all()
+    ids = [r.id for r in rows]
+    owners = await people(db, [r.owner_id for r in rows])
+    followers = dict((await db.execute(select(ChannelFollow.channel_id, func.count()).where(
+        ChannelFollow.channel_id.in_(ids)).group_by(ChannelFollow.channel_id))).all()) if ids else {}
+    books = dict((await db.execute(select(Audiobook.channel_id, func.count()).where(
+        Audiobook.channel_id.in_(ids)).group_by(Audiobook.channel_id))).all()) if ids else {}
+    return [{**record(r), "owner": owners.get(r.owner_id), "followers": followers.get(r.id, 0),
+             "audiobooks": books.get(r.id, 0)} for r in rows]
 
 @router.post("/moderation/{kind}/{id}")
 async def moderate(kind: str, id: UUID, data: Decision, db: DatabaseDep, admin: AdminDep):
@@ -213,9 +323,44 @@ async def plan_update(id: UUID, data: PlanInput, db: DatabaseDep, admin: AdminDe
     await db.commit()
     return record(row)
 
+def method_label(order: Order) -> str:
+    """'BKASH-BKash' -> 'bKash'; mock and older orders fall back to the gateway name."""
+    if order.method:
+        name = order.method.split("-", 1)[-1].strip() or order.method
+        return {"bkash": "bKash", "nagad": "Nagad", "rocket": "Rocket", "upay": "Upay"}.get(name.lower(), name)
+    return {"mock": "Test payment", "sslcommerz": "SSLCommerz"}.get(order.provider, order.provider)
+
 @router.get("/payments")
-async def payments(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(Order).order_by(Order.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+async def payments(db: DatabaseDep, admin: AdminDep, q: str = "", status: str = "", kind: str = "", method: str = "",
+                   date_from: str | None = None, date_to: str | None = None, sort: str = "newest",
+                   page: int = Query(1, ge=1)):
+    query = select(Order).where(*date_range(Order.created_at, date_from, date_to))
+    if q.strip():
+        number = serial_number(q, "p")
+        query = query.where(or_(Order.user_id.in_(select(User.id).where(or_(*member_conditions(q)))),
+                                Order.gateway_session.ilike(f"%{q.strip()}%"),
+                                *([Order.serial == number] if number is not None else [])))
+    if status:
+        query = query.where(Order.status == status)
+    if kind:
+        query = query.where(Order.kind == kind)
+    if method:
+        query = query.where(or_(Order.method.ilike(f"%{method}%"), Order.provider == method))
+    order_by = {"amount": Order.amount.desc()}.get(sort, ordering(Order.created_at, sort))
+    rows = (await db.scalars(query.order_by(order_by).offset((page-1)*PAGE).limit(PAGE))).all()
+    buyers = await people(db, [r.user_id for r in rows])
+    plan_ids = {r.plan_id for r in rows if r.plan_id}
+    plans = dict((await db.execute(select(Plan.id, Plan.name).where(Plan.id.in_(plan_ids)))).all()) if plan_ids else {}
+    return [{**record(r), "user": buyers.get(r.user_id), "plan_name": plans.get(r.plan_id),
+             "method_label": method_label(r)} for r in rows]
+
+@router.get("/payments/summary")
+async def payments_summary(db: DatabaseDep, admin: AdminDep, date_from: str | None = None, date_to: str | None = None):
+    """Totals for the payments page header, for the same date range."""
+    where = date_range(Order.created_at, date_from, date_to)
+    rows = (await db.execute(select(Order.status, func.count(), func.coalesce(func.sum(Order.amount), 0))
+                             .where(*where).group_by(Order.status))).all()
+    return {status: {"count": count, "amount": str(amount)} for status, count, amount in rows}
 
 @router.get("/finance")
 async def finance(db: DatabaseDep, admin: AdminDep):
@@ -225,9 +370,16 @@ async def finance(db: DatabaseDep, admin: AdminDep):
     fees = await total(Order, Order.amount, Order.kind == "publisher_registration", Order.status == "success")
     allocated = await total(Ledger, Ledger.amount, Ledger.kind == "earning")
     paid = await total(Withdrawal, Withdrawal.amount, Withdrawal.status == "completed")
+    from app.models.platform import DailyEarning
     pool = await total(FinancialSnapshot, FinancialSnapshot.publisher_pool)
     share = await total(FinancialSnapshot, FinancialSnapshot.platform_share)
     closed = await total(FinancialSnapshot, FinancialSnapshot.revenue)
+    # Days already credited in months that are not closed yet.
+    closed_months = set((await db.scalars(select(FinancialSnapshot.month))).all())
+    open_days = [d for d in (await db.scalars(select(DailyEarning))).all() if d.day[:7] not in closed_months]
+    pool = str(Decimal(pool) + sum((d.publisher_pool for d in open_days), Decimal(0)))
+    share = str(Decimal(share) + sum((d.revenue - d.publisher_pool for d in open_days), Decimal(0)))
+    closed = str(Decimal(closed) + sum((d.revenue for d in open_days), Decimal(0)))
     refunds = await total(FinancialAdjustment, FinancialAdjustment.amount, FinancialAdjustment.kind == "refund")
     adjustments = await total(FinancialAdjustment, FinancialAdjustment.amount, FinancialAdjustment.kind == "adjustment")
     subscription_deductions = await db.scalar(select(func.coalesce(func.sum(FinancialAdjustment.amount), 0)).join(
@@ -244,6 +396,18 @@ async def finance(db: DatabaseDep, admin: AdminDep):
 @router.post("/finance/close/{month}")
 async def close(month: str, db: DatabaseDep, admin: AdminDep):
     return record(await billing.close_month(db, admin, month))
+
+@router.get("/finance/daily")
+async def finance_daily(db: DatabaseDep, admin: AdminDep, date_from: str | None = None, date_to: str | None = None):
+    """Daily earnings closes (newest first), optionally within a date range."""
+    from app.models.platform import DailyEarning
+    await billing.close_due_days(db)
+    query = select(DailyEarning)
+    if date_from:
+        query = query.where(DailyEarning.day >= date_from)
+    if date_to:
+        query = query.where(DailyEarning.day <= date_to)
+    return [record(r) for r in (await db.scalars(query.order_by(DailyEarning.day.desc()).limit(120))).all()]
 
 @router.get("/adjustments")
 async def adjustments(db: DatabaseDep, admin: AdminDep):
@@ -277,9 +441,22 @@ async def adjust(data: AdjustmentInput, db: DatabaseDep, admin: AdminDep):
     return record(row)
 
 @router.get("/withdrawals")
-async def withdrawals(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    rows = (await db.scalars(select(Withdrawal).order_by(Withdrawal.created_at.desc()).offset((page-1)*50).limit(50))).all()
-    return await with_member_numbers(db, rows, "publisher_id")
+async def withdrawals(db: DatabaseDep, admin: AdminDep, q: str = "", status: str = "", method: str = "",
+                      date_from: str | None = None, date_to: str | None = None, sort: str = "newest",
+                      page: int = Query(1, ge=1)):
+    query = select(Withdrawal).where(*date_range(Withdrawal.created_at, date_from, date_to))
+    if status:
+        query = query.where(Withdrawal.status == status)
+    if method:
+        query = query.where(Withdrawal.method == method)
+    if q.strip():
+        query = query.where(or_(Withdrawal.publisher_id.in_(select(User.id).where(or_(*member_conditions(q)))),
+                                Withdrawal.account_number.ilike(f"%{q.strip()}%"),
+                                Withdrawal.payout_reference.ilike(f"%{q.strip()}%")))
+    rows = (await db.scalars(query.order_by(ordering(Withdrawal.created_at, sort)).offset((page-1)*PAGE).limit(PAGE))).all()
+    publishers = await people(db, [r.publisher_id for r in rows])
+    return [{**row, "publisher": publishers.get(r.publisher_id)}
+            for r, row in zip(rows, await with_member_numbers(db, rows, "publisher_id"))]
 
 @router.post("/withdrawals/{id}/decision")
 async def withdrawal_decision(id: UUID, data: WithdrawalDecision, db: DatabaseDep, admin: AdminDep):
@@ -317,5 +494,37 @@ async def withdrawal_decision(id: UUID, data: WithdrawalDecision, db: DatabaseDe
     return record(row)
 
 @router.get("/audit")
-async def history(db: DatabaseDep, admin: AdminDep, page: int = Query(1, ge=1)):
-    return [record(r) for r in (await db.scalars(select(Audit).order_by(Audit.created_at.desc()).offset((page-1)*50).limit(50))).all()]
+async def history(db: DatabaseDep, admin: AdminDep, q: str = "", group: str = "", actor: str = "",
+                  date_from: str | None = None, date_to: str | None = None, sort: str = "newest",
+                  page: int = Query(1, ge=1)):
+    """Audit entries with readable numbers (A-000001), the acting member and filters."""
+    query = select(Audit).where(*date_range(Audit.created_at, date_from, date_to))
+    if group:
+        query = query.where(Audit.action.like(f"{group}.%"))
+    if q.strip():
+        number = serial_number(q, "a")
+        query = query.where(or_(Audit.action.ilike(f"%{q.strip()}%"), Audit.target.ilike(f"%{q.strip()}%"),
+                                *([Audit.serial == number] if number is not None else [])))
+    if actor.strip():
+        if actor.strip().lower() == "system":
+            query = query.where(Audit.actor_id.is_(None))
+        else:
+            query = query.where(Audit.actor_id.in_(select(User.id).where(or_(*member_conditions(actor)))))
+    rows = (await db.scalars(query.order_by(ordering(Audit.created_at, sort)).offset((page-1)*PAGE).limit(PAGE))).all()
+    actors = await people(db, [r.actor_id for r in rows])
+    # Targets are ids of many kinds; name the ones that are members.
+    targets = {}
+    for r in rows:
+        try:
+            targets[r.id] = UUID(r.target)
+        except (ValueError, TypeError):
+            pass
+    members = await people(db, targets.values())
+    return [{**record(r), "actor": actors.get(r.actor_id), "target_member": members.get(targets.get(r.id))}
+            for r in rows]
+
+@router.get("/audit/groups")
+async def audit_groups(db: DatabaseDep, admin: AdminDep):
+    """The action families present in the log (the part before the first dot), for the filter."""
+    actions = (await db.scalars(select(Audit.action).distinct())).all()
+    return sorted({a.split(".", 1)[0] for a in actions if a})

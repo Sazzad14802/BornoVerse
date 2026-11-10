@@ -3,15 +3,22 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import uuid
 from typing import Optional
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Index, Numeric, JSON, Uuid, UniqueConstraint, text
+from sqlalchemy import (String, Text, Integer, Boolean, DateTime, FetchedValue, ForeignKey, Index, Numeric, JSON,
+                        Uuid, UniqueConstraint, text)
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDPrimaryKeyMixin, TimestampMixin
 
 def now():
     return datetime.now(timezone.utc)
 
+def serial_column():
+    """Readable sequence number (C-0001, P-0001, A-000001) filled by PostgreSQL; the UUID stays the key."""
+    return mapped_column(Integer, server_default=FetchedValue(), unique=True)
+
 class Channel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "channels"
+    __mapper_args__ = {"eager_defaults": True}
+    serial: Mapped[Optional[int]] = serial_column()
     owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(150))
     description: Mapped[str] = mapped_column(Text, default="")
@@ -41,6 +48,10 @@ class Plan(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "payment_orders"
+    __mapper_args__ = {"eager_defaults": True}
+    serial: Mapped[Optional[int]] = serial_column()
+    # How the buyer paid, as the gateway reports it (e.g. "BKASH-BKash").
+    method: Mapped[str] = mapped_column(String(60), default="", server_default="")
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
     kind: Mapped[str] = mapped_column(String(30))
     plan_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("subscription_plans.id"))
@@ -61,6 +72,8 @@ class PaymentEvent(Base, UUIDPrimaryKeyMixin):
 
 class Audit(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "audit_history"
+    __mapper_args__ = {"eager_defaults": True}
+    serial: Mapped[Optional[int]] = serial_column()
     actor_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(100))
     target: Mapped[str] = mapped_column(String(100))
@@ -114,6 +127,26 @@ class EligibleView(Base, UUIDPrimaryKeyMixin):
     publisher_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
     month: Mapped[str] = mapped_column(String(7), index=True)
     __table_args__ = (UniqueConstraint("user_id", "audiobook_id", "month"),)
+
+class DailyListen(Base, UUIDPrimaryKeyMixin):
+    """One eligible Premium listen per listener, audiobook and day (Asia/Dhaka); drives daily earnings."""
+    __tablename__ = "daily_listens"
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    audiobook_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("audiobooks.id"))
+    publisher_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (UniqueConstraint("user_id", "audiobook_id", "day", name="uq_daily_listen"),)
+
+class DailyEarning(Base):
+    """A closed day: the Premium income recognised that day and how much of its pool was shared."""
+    __tablename__ = "daily_earnings"
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    revenue: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    publisher_pool: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    allocated: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    listens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class FinancialSnapshot(Base):
     __tablename__ = "financial_snapshots"

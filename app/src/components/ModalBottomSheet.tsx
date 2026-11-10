@@ -17,16 +17,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
-  KeyboardAvoidingView,
   LayoutChangeEvent,
   PanResponder,
-  Platform,
   Pressable,
   StyleSheet,
+  TextInput,
+  useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardHeight } from './KeyboardInset';
 import { Colors, Radius, Spacing } from '../theme';
 
 interface SheetProps {
@@ -109,12 +110,17 @@ export function ModalBottomSheet({ visible, onClose, children }: SheetProps) {
 interface SheetScroll {
   position: number;
   max: { current: number };
+  /** Scroll the content (clamped to its ends). */
+  scrollTo: (value: number) => void;
+  /** Height of the on-screen keyboard, 0 when hidden. */
+  keyboard: number;
 }
 
 const SheetScrollContext = createContext<SheetScroll | null>(null);
 
 function SheetOverlay({ visible, onClose, children }: SheetProps) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [shown, setShown] = useState(visible);
   const [offset, setOffsetState] = useState(OFFSCREEN);
   const [scroll, setScrollState] = useState(0);
@@ -217,7 +223,16 @@ function SheetOverlay({ visible, onClose, children }: SheetProps) {
     }),
   ).current;
 
-  const scrollState = useMemo<SheetScroll>(() => ({ position: scroll, max: scrollMax }), [scroll]);
+  const keyboard = useKeyboardHeight();
+  const scrollState = useMemo<SheetScroll>(
+    () => ({
+      position: scroll,
+      max: scrollMax,
+      scrollTo: (value: number) => setScroll(Math.max(0, Math.min(value, scrollMax.current))),
+      keyboard,
+    }),
+    [scroll, keyboard, setScroll],
+  );
 
   if (!shown) return null;
 
@@ -225,16 +240,18 @@ function SheetOverlay({ visible, onClose, children }: SheetProps) {
   const backdropOpacity = Math.max(0, 1 - offset / 400);
 
   return (
-    <KeyboardAvoidingView
-      style={StyleSheet.absoluteFill}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      pointerEvents={visible ? 'auto' : 'none'}
-    >
+    <View style={StyleSheet.absoluteFill} pointerEvents={visible ? 'auto' : 'none'}>
       <Pressable style={[styles.backdrop, { opacity: backdropOpacity }]} onPress={onClose} />
       <View
         style={[
           styles.sheetContainer,
-          { paddingBottom: Spacing.xl + insets.bottom, transform: [{ translateY: offset }] },
+          {
+            // Above the keyboard while it is open (the safe-area inset is then under the keyboard).
+            bottom: keyboard,
+            paddingBottom: keyboard > 0 ? Spacing.md : Spacing.xl + insets.bottom,
+            maxHeight: Math.max(240, windowHeight - keyboard - insets.top - Spacing.md),
+            transform: [{ translateY: offset }],
+          },
         ]}
         {...responder.panHandlers}
       >
@@ -243,7 +260,7 @@ function SheetOverlay({ visible, onClose, children }: SheetProps) {
         </View>
         <SheetScrollContext.Provider value={scrollState}>{children}</SheetScrollContext.Provider>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -254,27 +271,64 @@ interface SheetScrollViewProps {
   style?: ViewStyle;
 }
 
-/** Scrollable area for long content inside a ModalBottomSheet (one per sheet). */
+/** Smallest visible height of the scroll area while the keyboard is open. */
+const MIN_VISIBLE = 140;
+
+/**
+ * Scrollable area for long content inside a ModalBottomSheet (one per sheet).
+ * While the keyboard is open the area gets shorter by the keyboard's height (the
+ * sheet itself is lifted above the keyboard), and the focused field is scrolled
+ * into view, so no input is ever hidden behind the keyboard.
+ */
 export function SheetScrollView({ children, maxHeight, style }: SheetScrollViewProps) {
   const scroll = useContext(SheetScrollContext);
   const viewport = useRef(0);
   const content = useRef(0);
+  const contentView = useRef<View>(null);
 
   const updateMax = () => {
     if (scroll) scroll.max.current = Math.max(0, content.current - viewport.current);
   };
 
+  const keyboard = scroll?.keyboard ?? 0;
+  const visible = keyboard > 0 ? Math.max(MIN_VISIBLE, maxHeight - keyboard) : maxHeight;
+
+  // Bring the focused field into view once the keyboard (and the new height) settle.
+  useEffect(() => {
+    if (!scroll || keyboard <= 0) return;
+    const timer = setTimeout(() => {
+      const focused = TextInput.State.currentlyFocusedInput?.() as unknown as View | null;
+      const container = contentView.current;
+      if (!focused || !container) return;
+      try {
+        focused.measureLayout(
+          container as any,
+          (_x, y, _w, h) => {
+            const top = scroll.position;
+            const bottom = top + viewport.current;
+            if (y < top) scroll.scrollTo(y - 12);
+            else if (y + h > bottom) scroll.scrollTo(y + h - viewport.current + 12);
+          },
+          () => {},
+        );
+      } catch {}
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [keyboard, visible]);
+
   if (!scroll) return <View style={[{ maxHeight }, style]}>{children}</View>;
 
   return (
     <View
-      style={[{ maxHeight, overflow: 'hidden' }, style]}
+      style={[{ maxHeight: visible, overflow: 'hidden' }, style]}
       onLayout={(e: LayoutChangeEvent) => {
         viewport.current = e.nativeEvent.layout.height;
         updateMax();
       }}
     >
       <View
+        ref={contentView}
+        collapsable={false}
         style={{ transform: [{ translateY: -scroll.position }] }}
         onLayout={(e: LayoutChangeEvent) => {
           content.current = e.nativeEvent.layout.height;

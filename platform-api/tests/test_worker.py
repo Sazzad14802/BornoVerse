@@ -47,6 +47,18 @@ async def test_progressive_worker_retry_preserves_order(db_session,tmp_path,monk
     await worker.process(*lease)
     await db_session.refresh(job)
     assert job.status==AudiobookStatus.COMPLETED and job.completed_pages==2
-    chapters=(await db_session.scalars(select(Chapter).where(Chapter.audiobook_id==book.id).order_by(Chapter.chapter_number))).all()
-    assert [c.chapter_number for c in chapters]==[1,2]
+    chapters=(await db_session.scalars(select(Chapter).where(Chapter.audiobook_id==book.id).order_by(Chapter.chapter_number).execution_options(populate_existing=True))).all()
+    # No chapter titles: page 2 continues page 1's chapter in one continuous file.
+    assert [c.chapter_number for c in chapters]==[1] and chapters[0].title=='Worker test'
+    assert abs(chapters[0].duration_seconds-0.2)<1e-6
     assert calls==3  # First page was not regenerated after recovery.
+
+
+def test_pages_split_into_chapters_at_titles():
+    text = "end of the last chapter.\n## অধ্যায় ২\nনতুন অধ্যায়ের লেখা।"
+    assert worker.split_chapters(text) == [
+        (None, "end of the last chapter."),
+        ("অধ্যায় ২", "অধ্যায় ২।\nনতুন অধ্যায়ের লেখা।"),
+    ]
+    assert worker.split_chapters("   \n") == []
+    assert worker.split_chapters("## Chapter 3") == [("Chapter 3", "Chapter 3।")]

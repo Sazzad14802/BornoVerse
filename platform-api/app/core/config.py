@@ -125,7 +125,10 @@ class Settings(BaseSettings):
     # ── Security & Authentication ──────────────────────────────────────────
     JWT_SECRET_KEY: str = "insecure-development-secret-key-change-in-production-1234567890"
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    # Sessions last until the user signs out: tokens are long-lived and the apps renew
+    # them on launch (POST /auth/session/renew). Sign-out, password reset and
+    # suspension still revoke them at once through users.token_version.
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 365  # 1 year
 
     # ── Storage ────────────────────────────────────────────────────────────
     # "local" keeps files on disk only; "supabase" also mirrors them to Supabase

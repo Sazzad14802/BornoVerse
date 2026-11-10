@@ -9,9 +9,13 @@ import {
   cleanup,
 } from "@testing-library/react";
 import { App } from "./main";
+import { setToken } from "./api";
 afterEach(cleanup);
 let requests: { path: string; body: any }[];
 beforeEach(() => {
+  localStorage.clear();
+  setToken("");
+  window.history.replaceState(null, "", "/");
   requests = [];
   vi.stubGlobal(
     "fetch",

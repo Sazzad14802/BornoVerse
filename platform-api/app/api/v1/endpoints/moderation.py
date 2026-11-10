@@ -35,7 +35,7 @@ def iso(value) -> Optional[str]:
 async def person(db, user_id) -> Optional[dict]:
     user = await db.get(User, user_id) if user_id else None
     return {"id": str(user.id), "username": user.username, "name": user.full_name or user.username,
-            "serial": user.serial} if user else None
+            "serial": user.serial, "email": user.email} if user else None
 
 
 async def add_evidence(db, file: UploadFile, uploader: User, *, report_id=None, appeal_id=None) -> dict:
@@ -231,14 +231,32 @@ async def report_row(db, report: Report) -> dict:
     }
 
 
+def search_conditions(q: str, user_column, book_column) -> list:
+    """Free-text search over the member involved (name, email, U-number) and the audiobook title."""
+    from app.api.v1.endpoints.management import member_conditions
+    if not q.strip():
+        return []
+    return [or_(user_column.in_(select(User.id).where(or_(*member_conditions(q)))),
+                book_column.in_(select(Audiobook.id).where(Audiobook.title.ilike(f"%{q.strip()}%"))))]
+
+
 @admin_router.get("/reports")
-async def list_reports(db: DatabaseDep, admin: AdminDep, status: str = "", page: int = Query(1, ge=1)):
-    query = select(Report)
+async def list_reports(db: DatabaseDep, admin: AdminDep, status: str = "", category: str = "", q: str = "",
+                       date_from: Optional[str] = None, date_to: Optional[str] = None, sort: str = "newest",
+                       page: int = Query(1, ge=1)):
+    from app.api.v1.endpoints.management import date_range
+    query = select(Report).where(*date_range(Report.created_at, date_from, date_to))
     if status == "open":
         query = query.where(Report.status.in_(mod.OPEN_STATUSES))
     elif status:
         query = query.where(Report.status == status)
-    rows = (await db.scalars(query.order_by(Report.created_at.desc()).offset((page - 1) * 50).limit(50))).all()
+    if category:
+        query = query.where(Report.category == category)
+    if q.strip():
+        query = query.where(or_(*search_conditions(q, Report.user_id, Report.audiobook_id),
+                                *search_conditions(q, Report.owner_id, Report.audiobook_id)))
+    order = Report.created_at.asc() if sort == "oldest" else Report.created_at.desc()
+    rows = (await db.scalars(query.order_by(order).offset((page - 1) * 50).limit(50))).all()
     return [await report_row(db, r) for r in rows]
 
 
@@ -336,16 +354,20 @@ class ActionInput(BaseModel):
     flag_note: str = Field(default="", max_length=2000)
     message: str = Field(default="", max_length=2000)
     note: str = Field(default="", max_length=2000)
+    notify_reporters: bool = True
 
 
 @admin_router.post("/reports/{report_id}/actions")
 async def take_actions(report_id: UUID, data: ActionInput, db: DatabaseDep, admin: AdminDep):
     report = await open_report(db, report_id)
+    # Reporters hear back once, when their open report is first acted on.
+    reported = [report, *await mod.siblings(db, report)] if report.status in mod.OPEN_STATUSES else []
     notice = await mod.take_actions(db, admin, report, violation=data.violation, notify_owner=data.notify,
                                     hide=data.hide, restrict_days=data.restrict_days, flag_note=data.flag_note.strip(),
                                     message=data.message.strip(), note=data.note.strip())
+    updates = await mod.reporter_notices(db, reported, "action") if data.notify_reporters else []
     await db.commit()
-    await deliver(db, [notice])
+    await deliver(db, [notice, *updates])
     return await report_row(db, report)
 
 
@@ -356,10 +378,13 @@ async def dismiss(report_id: UUID, data: NoteInput, db: DatabaseDep, admin: Admi
         raise HTTPException(409, "Only open reports can be dismissed")
     report.resolution = data.note or "No violation found"
     mod.set_status(db, admin, report, "dismissed", data.note)
-    for other in await mod.siblings(db, report):
+    others = await mod.siblings(db, report)
+    for other in others:
         other.resolution = report.resolution
         mod.set_status(db, admin, other, "dismissed", f"Dismissed with case {report.id}")
+    updates = await mod.reporter_notices(db, [report, *others], "dismissed")
     await db.commit()
+    await deliver(db, updates)
     return await report_row(db, report)
 
 
@@ -385,20 +410,65 @@ async def confirm_violation(report_id: UUID, data: ConfirmInput, db: DatabaseDep
         raise HTTPException(409, "Decide the pending appeal instead")
     if not report.violation:
         report.violation = report.category
+    # Confirming straight from an open report: its reporters have not heard back yet.
+    reported = [report, *await mod.siblings(db, report)] if report.status in mod.OPEN_STATUSES else []
     notice = await mod.confirm_violation(db, admin, report, delete_content=data.delete_content, note=data.note.strip())
+    updates = await mod.reporter_notices(db, reported, "confirmed")
     await db.commit()
-    await deliver(db, [notice])
+    await deliver(db, [notice, *updates])
     return await report_row(db, report)
+
+
+class EmailInput(BaseModel):
+    to: Literal["owner", "reporter", "both"]
+    subject: str = Field(min_length=3, max_length=200)
+    message: str = Field(min_length=3, max_length=5000)
+
+
+@admin_router.post("/reports/{report_id}/email")
+async def email_parties(report_id: UUID, data: EmailInput, db: DatabaseDep, admin: AdminDep):
+    """Write to the content owner and/or the reporter about this case. The message is
+    emailed and also kept in their in-app notifications."""
+    from app.services.mail_service import mail_configured
+    from app.services.notification_service import email_notices
+    report = await db.get(Report, report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    book = await db.get(Audiobook, report.audiobook_id)
+    recipients = []
+    if data.to in ("owner", "both") and (report.owner_id or book):
+        recipients.append(("owner", report.owner_id or book.owner_id))
+    if data.to in ("reporter", "both") and report.source == "listener":
+        recipients.append(("reporter", report.user_id))
+    if not recipients:
+        raise HTTPException(409, "This case has no recipient of that kind")
+    reference = f"\n\nCase R-{str(report.id)[:8].upper()} · {book.title if book else ''}"
+    notices = [notify(db, user_id, "moderation.message", data.subject.strip(), data.message.strip() + reference,
+                      en=(data.subject.strip(), data.message.strip() + reference), report_id=str(report.id),
+                      audiobook_id=str(report.audiobook_id))
+               for _, user_id in recipients]
+    audit(db, admin, "moderation.email.sent", report.id, to=[role for role, _ in recipients], subject=data.subject)
+    await db.commit()
+    emailed = await email_notices(db, notices)
+    await deliver(db, notices, email=False)
+    return {"recipients": [role for role, _ in recipients], "emailed": emailed, "mail_configured": mail_configured()}
 
 
 # ── Admin: appeals ──────────────────────────────────────────────────────────
 
 @admin_router.get("/appeals")
-async def list_appeals(db: DatabaseDep, admin: AdminDep, status: str = "", page: int = Query(1, ge=1)):
-    query = select(ContentAppeal)
+async def list_appeals(db: DatabaseDep, admin: AdminDep, status: str = "", q: str = "",
+                       date_from: Optional[str] = None, date_to: Optional[str] = None, sort: str = "newest",
+                       page: int = Query(1, ge=1)):
+    from app.api.v1.endpoints.management import date_range
+    query = select(ContentAppeal).where(*date_range(ContentAppeal.created_at, date_from, date_to))
     if status:
         query = query.where(ContentAppeal.status == status)
-    rows = (await db.scalars(query.order_by(ContentAppeal.created_at.desc()).offset((page - 1) * 50).limit(50))).all()
+    if q.strip():
+        books = select(Report.id).where(*search_conditions(q, Report.owner_id, Report.audiobook_id))
+        query = query.where(ContentAppeal.report_id.in_(books))
+    order = ContentAppeal.created_at.asc() if sort == "oldest" else ContentAppeal.created_at.desc()
+    rows = (await db.scalars(query.order_by(order).offset((page - 1) * 50).limit(50))).all()
     result = []
     for a in rows:
         report = await db.get(Report, a.report_id)
@@ -471,7 +541,9 @@ async def evidence_file(evidence_id: UUID, db: DatabaseDep, admin: AdminDep):
         raise HTTPException(404, "Evidence not found")
     audit(db, admin, "moderation.evidence.viewed", row.id)
     await db.commit()
-    return FileResponse(path, media_type=row.content_type, filename=row.filename, headers={"Cache-Control": "no-store"})
+    # Inline, so the admin portal can preview it inside the case window.
+    return FileResponse(path, media_type=row.content_type, filename=row.filename, content_disposition_type="inline",
+                        headers={"Cache-Control": "no-store"})
 
 
 @admin_router.get("/users/{user_id}/moderation")

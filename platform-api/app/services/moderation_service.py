@@ -121,6 +121,41 @@ def notice_body(title: str, violation: str, lines: list[tuple[str, str]], appeal
     return "\n\n".join(body)
 
 
+REPORTER_OUTCOMES = {
+    "action": ("আপনার রিপোর্টে ব্যবস্থা নেওয়া হয়েছে",
+               "«{title}» নিয়ে আপনার রিপোর্ট আমরা পর্যালোচনা করেছি এবং কনটেন্টের মালিকের বিরুদ্ধে ব্যবস্থা নিয়েছি। ধন্যবাদ।",
+               "Action taken on your report",
+               "We reviewed your report about “{title}” and took action against the content owner. Thank you."),
+    "confirmed": ("আপনার রিপোর্ট সঠিক প্রমাণিত হয়েছে",
+                  "«{title}» নিয়ে আপনার রিপোর্টে নীতিমালা লঙ্ঘন নিশ্চিত হয়েছে এবং ব্যবস্থা নেওয়া হয়েছে। ধন্যবাদ।",
+                  "Your report was confirmed",
+                  "The policy violation you reported about “{title}” was confirmed and action was taken. Thank you."),
+    "dismissed": ("আপনার রিপোর্ট পর্যালোচনা হয়েছে",
+                  "«{title}» নিয়ে আপনার রিপোর্ট আমরা পর্যালোচনা করেছি, তবে কোনো নীতিমালা লঙ্ঘন পাইনি।",
+                  "Your report was reviewed",
+                  "We reviewed your report about “{title}” and did not find a violation of our policies."),
+}
+
+
+async def reporter_notices(db: AsyncSession, reports: list[Report], outcome: str, message: str = "") -> list[Notification]:
+    """Tell listeners who reported content what came of it (moderator-opened cases have no reporter)."""
+    title_bn, body_bn, title_en, body_en = REPORTER_OUTCOMES[outcome]
+    notices, seen = [], set()
+    for report in reports:
+        if report.source != "listener" or report.user_id in seen or report.user_id == report.owner_id:
+            continue
+        seen.add(report.user_id)
+        book = await db.get(Audiobook, report.audiobook_id)
+        title = book.title if book else ""
+        bn, en = body_bn.format(title=title), body_en.format(title=title)
+        if message:
+            bn += f"\n\nমডারেটরের বার্তা: {message}"
+            en += f"\n\nModerator's message: {message}"
+        notices.append(notify(db, report.user_id, f"report.{outcome}", title_bn, bn, en=(title_en, en),
+                              report_id=str(report.id), audiobook_id=str(report.audiobook_id)))
+    return notices
+
+
 async def take_actions(db: AsyncSession, admin: User, report: Report, *, violation: str, notify_owner: bool,
                        hide: bool, restrict_days: Optional[int], flag_note: str, message: str,
                        note: str) -> Optional[Notification]:

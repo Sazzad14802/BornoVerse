@@ -961,3 +961,289 @@ select.inline {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Action colours: each kind of action has its own colour ──────────────
+   primary (green) = main step · info (blue) = view/open/details · success
+   (teal) = approve/restore · warn (amber) = suspend/restrict · danger (red)
+   = reject/delete/confirm violation · secondary/ghost = neutral */
+:root {
+  --info: #1d5fa8;
+  --info-dark: #174d8a;
+  --info-surface: #e7f0fb;
+  --success-strong: #13795b;
+  --success-strong-dark: #0f6149;
+  --warn: #b25e09;
+  --warn-dark: #924c06;
+}
+button.info {
+  background: var(--info-surface);
+  border-color: #bcd3ef;
+  color: var(--info);
+}
+button.info:hover {
+  background: var(--info);
+  border-color: var(--info);
+  color: #fff;
+}
+button.success {
+  background: var(--success-strong);
+  border-color: var(--success-strong);
+}
+button.success:hover {
+  background: var(--success-strong-dark);
+  border-color: var(--success-strong-dark);
+}
+button.warn {
+  background: var(--warn);
+  border-color: var(--warn);
+}
+button.warn:hover {
+  background: var(--warn-dark);
+  border-color: var(--warn-dark);
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+button.ghost:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+.actions button {
+  white-space: nowrap;
+}
+
+/* ── Filters ─────────────────────────────────────────────────────────── */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  padding: 14px;
+  margin-bottom: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.filter-search {
+  flex: 1 1 260px;
+  max-width: 380px;
+}
+.filter-field {
+  flex: 0 1 auto;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.filter-field select,
+.filter-field input {
+  min-width: 140px;
+  padding: 8px 10px;
+}
+.filter-dates {
+  display: flex;
+  gap: 8px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* ── Refresh / sync feedback ─────────────────────────────────────────── */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.progress-bar {
+  position: relative;
+  height: 3px;
+  margin: -20px 0 17px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--primary-surface);
+}
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: var(--brand);
+  animation: slide 1s ease-in-out infinite;
+}
+.synced {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--success);
+}
+.refresh[aria-busy="true"] {
+  opacity: 1;
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.boot {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+.boot .brand-mark {
+  width: 48px;
+  height: 48px;
+  animation: spin 2.4s linear infinite;
+}
+
+/* ── Badges for more values ─────────────────────────────────────────── */
+.badge.premium {
+  background: #f1e8fb;
+  color: #6b35a6;
+}
+.badge.free,
+.badge.published,
+.badge.COMPLETED,
+.badge.confirmed {
+  background: var(--success-surface);
+  color: var(--success);
+}
+.badge.PROCESSING,
+.badge.PENDING,
+.badge.draft,
+.badge.under_review,
+.badge.appealed {
+  background: var(--warning-surface);
+  color: var(--warning);
+}
+.badge.FAILED,
+.badge.deleted,
+.badge.dismissed,
+.badge.action_taken {
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+.badge.method,
+.badge.resolved {
+  background: var(--info-surface);
+  color: var(--info);
+}
+.metrics.compact {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  margin: 12px 0 0;
+}
+.metrics.compact strong {
+  font-size: 20px;
+}
+
+/* ── Audit details ──────────────────────────────────────────────────── */
+.kv {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 12px;
+}
+.kv dt {
+  color: var(--text-muted);
+}
+.kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── Inline evidence preview ────────────────────────────────────────── */
+.preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--surface-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.preview img,
+.preview video {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+}
+.preview iframe {
+  width: 100%;
+  height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+.preview audio {
+  width: 100%;
+}
+.preview pre {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: #fff;
+  padding: 10px;
+  border-radius: 6px;
+  margin: 0;
+}
+.btn-link {
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 12px;
+}
+button.link.active {
+  text-decoration: underline;
+}
+
+/* ── Case window: forms open in the side column, next to the buttons ── */
+.case-grid {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+.case-side {
+  position: sticky;
+  top: 0;
+}
+.case-side .panel-inline {
+  margin-top: 0;
+}
+.notice.small {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .case-grid {
+    grid-template-columns: 1fr;
+  }
+  .case-side {
+    position: static;
+    order: -1;
+  }
+}

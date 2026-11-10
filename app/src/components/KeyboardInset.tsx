@@ -1,14 +1,14 @@
 /**
- * KeyboardInset — keeps typed text visible above the on-screen keyboard.
+ * Keeps typed text visible above the on-screen keyboard.
  *
  * Android draws the app edge to edge, so the system no longer shrinks the
- * window when the keyboard opens. This wrapper does it instead: while the
- * keyboard is up, the whole app (screens and bottom sheets) gets bottom
- * padding equal to the keyboard's height. Scroll views then end above the
- * keyboard and Android scrolls the focused field into view, and everything
- * else on the screen can still be reached by scrolling.
- *
- * `useKeyboardHeight()` lets parts of the UI react (the tab bar hides).
+ * window when the keyboard opens. We do it instead:
+ * - <KeyboardHeightProvider> tracks the keyboard's height (`useKeyboardHeight()`).
+ * - <KeyboardInset> gives the screens bottom padding equal to that height, so
+ *   scroll views end above the keyboard and Android scrolls the focused field
+ *   into view.
+ * Bottom sheets are drawn outside <KeyboardInset> (absolutely positioned views
+ * ignore a parent's padding) and lift themselves by the same height.
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -20,7 +20,7 @@ export function useKeyboardHeight(): number {
   return useContext(KeyboardHeight);
 }
 
-export function KeyboardInset({ children }: { children: React.ReactNode }) {
+export function KeyboardHeightProvider({ children }: { children: React.ReactNode }) {
   const [height, setHeight] = useState(0);
 
   useEffect(() => {
@@ -34,11 +34,12 @@ export function KeyboardInset({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  return (
-    <KeyboardHeight.Provider value={height}>
-      <View style={[styles.fill, { paddingBottom: height }]}>{children}</View>
-    </KeyboardHeight.Provider>
-  );
+  return <KeyboardHeight.Provider value={height}>{children}</KeyboardHeight.Provider>;
+}
+
+export function KeyboardInset({ children }: { children: React.ReactNode }) {
+  const height = useKeyboardHeight();
+  return <View style={[styles.fill, { paddingBottom: height }]}>{children}</View>;
 }
 
 const styles = StyleSheet.create({

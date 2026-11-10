@@ -40,6 +40,11 @@ export const authApi = {
     return apiClient.get<User>('/auth/me');
   },
 
+  /** Swaps the current (still valid) token for a fresh one, so a used device never expires. */
+  renewSession(): Promise<TokenResponse> {
+    return apiClient.post<TokenResponse>('/auth/session/renew');
+  },
+
   /** Revokes every session for this account on the server. */
   logout(): Promise<unknown> {
     return apiClient.post('/auth/logout');

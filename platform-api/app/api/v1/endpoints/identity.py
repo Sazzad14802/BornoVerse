@@ -22,6 +22,12 @@ async def admin_login(data: LoginRequest, db: DatabaseDep):
     user = await authenticate_user(db, data.username_or_email, data.password, "admin")
     return create_user_token(user)
 
+@router.post("/session/renew")
+async def renew_session(user: CurrentUserDep):
+    """Swap a still-valid token for a fresh one, so a signed-in device never expires
+    while it is used. Revoked tokens (sign-out, password reset, suspension) fail here."""
+    return create_user_token(user)
+
 @router.post("/logout")
 async def logout(db: DatabaseDep, user: CurrentUserDep):
     from sqlalchemy import delete

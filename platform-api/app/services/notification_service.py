@@ -98,7 +98,7 @@ def android_channel(kind: str) -> str:
         return "audiobooks"
     if kind.startswith(("payment.", "publisher.", "withdrawal.")):
         return "account"
-    if kind.startswith("moderation."):
+    if kind.startswith(("moderation.", "report.")):
         return "moderation"
     return "default"
 
@@ -146,11 +146,51 @@ def push_body(body: str) -> str:
     return first + ("\nবিস্তারিত দেখতে ট্যাপ করুন।" if first != body.strip() else "")
 
 
-async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notification]]) -> None:
-    """Push already-committed notifications to every device of their recipients."""
+# Notifications that are also emailed: moderation decisions reach owners and reporters
+# even when they have no push token or notifications turned off.
+EMAIL_KINDS = ("moderation.", "report.")
+
+
+def email_html(title: str, body: str) -> str:
+    from html import escape
+    paragraphs = "".join(f"<p style=\"margin:0 0 12px;white-space:pre-wrap\">{escape(p)}</p>"
+                         for p in body.split("\n\n") if p.strip())
+    return ("<div style=\"font-family:Arial,sans-serif;max-width:560px;color:#10231C\">"
+            "<h2 style=\"color:#0C7F5F;margin:0 0 4px\">BornoVerse</h2>"
+            f"<h3 style=\"margin:0 0 16px\">{escape(title)}</h3>{paragraphs}"
+            "<p style=\"color:#55675F;font-size:12px;margin-top:24px\">You can also see this in the BornoVerse app "
+            "under Notifications.</p></div>")
+
+
+async def email_notices(db: AsyncSession, rows: list[Notification]) -> int:
+    """Email the given notifications (best effort; never fails the caller). Returns the number sent."""
+    from app.services.mail_service import mail_configured, send_mail
+    rows = [n for n in rows if n.kind.startswith(EMAIL_KINDS)]
+    if not rows or not mail_configured():
+        return 0
+    users = {u.id: u for u in (await db.scalars(select(User).where(User.id.in_({n.user_id for n in rows})))).all()}
+    sent = 0
+    for n in rows:
+        user = users.get(n.user_id)
+        if not user or not user.email:
+            continue
+        title, body = localized(n, user.language == "en")
+        try:
+            await send_mail(user.email, f"BornoVerse: {title}", body, email_html(title, body))
+            sent += 1
+        except Exception as exc:  # the in-app inbox still has it
+            log.warning("Email for notification %s failed: %s", n.id, exc)
+    return sent
+
+
+async def deliver(db: AsyncSession, notifications: Iterable[Optional[Notification]], *, email: bool = True) -> None:
+    """Push already-committed notifications to every device of their recipients
+    (moderation updates are emailed as well, unless `email` is false)."""
     rows = [n for n in notifications if n is not None]
     if not rows:
         return
+    if email:
+        await email_notices(db, rows)
     user_ids = {n.user_id for n in rows}
     tokens = (await db.execute(select(PushToken.user_id, PushToken.token)
                                .where(PushToken.user_id.in_(user_ids)))).all()

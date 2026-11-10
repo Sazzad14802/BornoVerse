@@ -100,8 +100,16 @@ export interface PublisherDashboard {
   lifetime_earned: string;
   withdrawn: string;
   pending_withdrawals: string;
-  /** This month so far, split the way the month close will split it. */
-  this_month: { month: string; estimated: string; eligible_views: number; all_eligible_views: number; publisher_percent: number };
+  /** This month so far: credited day by day, plus today's running estimate. */
+  this_month: {
+    month: string;
+    estimated: string;
+    credited?: string;
+    today?: { day: string; estimated: string; listens: number; all_listens: number };
+    eligible_views: number;
+    all_eligible_views: number;
+    publisher_percent: number;
+  };
   followers: number;
   eligible_views: number;
   audiobooks: number;
@@ -136,6 +144,8 @@ export interface PlayManifest {
   session_id: string;
   chapters: PlayManifestChapter[];
   expires_in: number;
+  /** The book is still being generated: its last chapter grows and more may follow. */
+  generating?: boolean;
 }
 
 export interface OfflineLicense extends PlayManifest {

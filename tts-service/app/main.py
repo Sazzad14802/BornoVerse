@@ -57,14 +57,80 @@ async def service_auth(request: Request, call_next):
 async def extract_page(file: UploadFile = File(...), language: str = Form("bn")):
     import asyncio
     from app.services.gemini_service import gemini_service
+    """OCR one page. The page is always rendered to an image first, so the text is read
+    from what the page looks like, never from its (often broken) embedded text layer.
+    Chapter/section titles come back on their own lines starting with '## '."""
     raw = await file.read(20 * 1024 * 1024 + 1)
     if len(raw) > 20 * 1024 * 1024 or not raw.startswith(b"%PDF-"):
         raise HTTPException(400, "Invalid page PDF")
     def extract():
         with _ocr_lock:
-            return gemini_service.extract_text_from_pdf(raw, language)
+            image = render_page_png(raw)
+            if image is None:
+                return gemini_service.extract_text_from_pdf(raw, language, mark_headings=True)
+            if gemini_service.is_configured:
+                text = gemini_service.extract_text_from_pdf(image, language, mark_headings=True)
+                if text.strip():
+                    return text
+            from app.services.pdf_service import pdf_service
+            try:
+                return pdf_service.extract_text_via_ocr(raw)  # local EasyOCR on the rendered page
+            except Exception:
+                return pdf_service.extract_text(raw, language=language)
     text = await asyncio.to_thread(extract)
     return {"text": text}
+
+
+TARGET_RATE = 24000
+
+
+def normalize_wav(path: str) -> None:
+    """Rewrite a WAV as 24 kHz, mono, 16-bit, whatever engine produced it. The platform
+    joins consecutive pages into one chapter file, which needs identical formats."""
+    import wave
+    import numpy as np
+    try:
+        with wave.open(path, "rb") as source:
+            channels, width, rate = source.getnchannels(), source.getsampwidth(), source.getframerate()
+            frames = source.readframes(source.getnframes())
+    except Exception as exc:
+        logger.warning("Could not read WAV for normalising: %s", exc)
+        return
+    if (channels, width, rate) == (1, 2, TARGET_RATE):
+        return
+    dtype = {1: np.uint8, 2: np.int16, 4: np.int32}.get(width)
+    if dtype is None:
+        return
+    samples = np.frombuffer(frames, dtype=dtype).astype(np.float64)
+    if width == 1:
+        samples = (samples - 128) * 256
+    elif width == 4:
+        samples = samples / 65536
+    if channels > 1:
+        samples = samples.reshape(-1, channels).mean(axis=1)
+    if rate != TARGET_RATE and len(samples):
+        count = int(round(len(samples) * TARGET_RATE / rate))
+        samples = np.interp(np.linspace(0, len(samples) - 1, count), np.arange(len(samples)), samples)
+    with wave.open(path, "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(TARGET_RATE)
+        target.writeframes(np.clip(samples, -32768, 32767).astype(np.int16).tobytes())
+
+
+def render_page_png(pdf_bytes: bytes, scale: float = 2.0):
+    """First page of a PDF as PNG bytes (None if it cannot be rendered)."""
+    try:
+        import io
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(io.BytesIO(pdf_bytes))
+        image = pdf[0].render(scale=scale).to_pil()
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
+    except Exception as exc:
+        logger.warning("Page rendering failed (%s); using the PDF directly", exc)
+        return None
 
 # CORS setup
 app.add_middleware(
@@ -122,6 +188,7 @@ def generate_audio(request: TextRequest):
                 model_type=request.model_type,
             )
 
+        normalize_wav(audio_path)
         filename = Path(audio_path).name
         return FileResponse(
             path=audio_path,

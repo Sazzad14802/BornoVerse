@@ -2,9 +2,9 @@
  * Moderation: content reports dashboard, report case view with independent
  * actions, appeals queue and account moderation records.
  */
-import React, { useEffect, useState } from "react";
-import { fileUrl, request } from "./api";
-import { Icon, Modal, Row, dateTime, memberId } from "./ui";
+import React, { useEffect, useRef, useState } from "react";
+import { query, request } from "./api";
+import { FilePreview, FilterBar, FilterField, Filters, Icon, Modal, Row, dateTime, memberId, useDebounced } from "./ui";
 
 export const CATEGORY_LABELS: Record<string, string> = {
   sexual_content: "Sexual content",
@@ -54,55 +54,128 @@ function Status({ value }: { value: string | null | undefined }) {
   );
 }
 
-async function openFile(path: string, setError: (m: string) => void) {
-  try {
-    window.open(await fileUrl(path), "_blank", "noopener");
-  } catch (e) {
-    setError((e as Error).message);
-  }
+/** Evidence files as buttons that preview inside the case window. */
+function EvidenceList({ files }: { files: Row[] }) {
+  const [shown, setShown] = useState<Row | null>(null);
+  return (
+    <>
+      <ul className="files">
+        {files.map((f: Row) => (
+          <li key={f.id}>
+            <button
+              className={`link ${shown?.id === f.id ? "active" : ""}`}
+              onClick={() => setShown(shown?.id === f.id ? null : f)}
+              aria-expanded={shown?.id === f.id}
+            >
+              <Icon name="eye" size={14} />
+              {f.filename}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {shown && (
+        <FilePreview path={`/admin/moderation/evidence/${shown.id}`} name={shown.filename} onClose={() => setShown(null)} />
+      )}
+    </>
+  );
 }
+
+/** List page state: filters (debounced), page number and a reload on Refresh. */
+function useListPage<T>(path: string, initial: Filters, reloadKey: number) {
+  const [filters, setFilters] = useState<Filters>(initial);
+  const debounced = useDebounced(filters, 300);
+  const [page, setPage] = useState(1);
+  const [rows, setRows] = useState<T[] | null>(null);
+  const [error, setError] = useState("");
+  const sequence = useRef(0);
+  async function load() {
+    const current = ++sequence.current;
+    setError("");
+    try {
+      const result = await request(`${path}${query({ ...debounced, page })}`);
+      if (current === sequence.current) setRows(result);
+    } catch (e) {
+      if (current === sequence.current) setError((e as Error).message);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [debounced, page, reloadKey]);
+  return {
+    filters,
+    setFilters: (next: Filters) => {
+      setFilters(next);
+      setPage(1);
+    },
+    page,
+    setPage,
+    rows,
+    error,
+    load,
+  };
+}
+
+function Pager({ page, setPage, count }: { page: number; setPage: (n: number) => void; count: number }) {
+  return (
+    <div className="pagination">
+      <button className="secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>
+        Previous
+      </button>
+      <span>Page {page}</span>
+      <button className="secondary" disabled={count < 50} onClick={() => setPage(page + 1)}>
+        Next
+      </button>
+    </div>
+  );
+}
+
+const REPORT_FILTERS: FilterField[] = [
+  { key: "q", kind: "search", placeholder: "Search reporter, owner, U-0001 or title…" },
+  {
+    key: "status",
+    kind: "select",
+    label: "Status",
+    options: [
+      ["open", "Open (pending and under review)"],
+      ["action_taken", "Action taken"],
+      ["appealed", "Appealed"],
+      ["resolved", "Resolved"],
+      ["dismissed", "Dismissed"],
+      ["", "All reports"],
+    ],
+  },
+  { key: "category", kind: "select", label: "Category", options: [["", "Any"], ...Object.entries(CATEGORY_LABELS)] },
+  { kind: "dates" },
+  {
+    key: "sort",
+    kind: "select",
+    label: "Sort",
+    options: [
+      ["newest", "Newest first"],
+      ["oldest", "Oldest first"],
+    ],
+  },
+];
 
 // ── Reports dashboard ───────────────────────────────────────────────────────
 
 export function ReportsPage({
   listen,
   onChanged,
+  reloadKey = 0,
 }: {
   listen: (id: string) => void;
   onChanged: () => void;
+  reloadKey?: number;
 }) {
-  const [status, setStatus] = useState("open");
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [error, setError] = useState("");
+  const list = useListPage<Row>("/admin/reports", { status: "open" }, reloadKey);
+  const { rows, error } = list;
+  const load = list.load;
   const [open, setOpen] = useState<string | null>(null);
-
-  async function load() {
-    setError("");
-    try {
-      setRows(await request(`/admin/reports?status=${status}`));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  useEffect(() => {
-    load();
-  }, [status]);
 
   return (
     <>
-      <div className="toolbar">
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="open">Open (pending and under review)</option>
-            <option value="action_taken">Action taken</option>
-            <option value="appealed">Appealed</option>
-            <option value="resolved">Resolved</option>
-            <option value="dismissed">Dismissed</option>
-            <option value="">All reports</option>
-          </select>
-        </label>
-      </div>
+      <FilterBar fields={REPORT_FILTERS} values={list.filters} onChange={list.setFilters} />
       {error && (
         <div role="alert" className="error">
           {error}
@@ -168,7 +241,10 @@ export function ReportsPage({
                   </td>
                   <td>
                     <div className="actions">
-                      <button onClick={() => setOpen(r.id)}>Open</button>
+                      <button className="info" onClick={() => setOpen(r.id)}>
+                        <Icon name="eye" size={14} />
+                        Open
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -177,6 +253,7 @@ export function ReportsPage({
           </tbody>
         </table>
       </div>
+      {rows && <Pager page={list.page} setPage={list.setPage} count={rows.length} />}
       {open && (
         <ReportCase
           id={open}
@@ -194,42 +271,47 @@ export function ReportsPage({
 
 // ── Appeals queue ───────────────────────────────────────────────────────────
 
+const APPEAL_FILTERS: FilterField[] = [
+  { key: "q", kind: "search", placeholder: "Search owner, U-0001 or title…" },
+  {
+    key: "status",
+    kind: "select",
+    label: "Status",
+    options: [
+      ["pending", "Pending"],
+      ["accepted", "Accepted"],
+      ["rejected", "Rejected"],
+      ["", "All appeals"],
+    ],
+  },
+  { kind: "dates" },
+  {
+    key: "sort",
+    kind: "select",
+    label: "Sort",
+    options: [
+      ["newest", "Newest first"],
+      ["oldest", "Oldest first"],
+    ],
+  },
+];
+
 export function AppealsPage({
   listen,
   onChanged,
+  reloadKey = 0,
 }: {
   listen: (id: string) => void;
   onChanged: () => void;
+  reloadKey?: number;
 }) {
-  const [status, setStatus] = useState("pending");
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [error, setError] = useState("");
+  const list = useListPage<Row>("/admin/appeals", { status: "pending" }, reloadKey);
+  const { rows, error, load } = list;
   const [open, setOpen] = useState<string | null>(null);
-
-  async function load() {
-    try {
-      setRows(await request(`/admin/appeals?status=${status}`));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  useEffect(() => {
-    load();
-  }, [status]);
 
   return (
     <>
-      <div className="toolbar">
-        <label>
-          Status
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="pending">Pending</option>
-            <option value="accepted">Accepted</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All appeals</option>
-          </select>
-        </label>
-      </div>
+      <FilterBar fields={APPEAL_FILTERS} values={list.filters} onChange={list.setFilters} />
       {error && (
         <div role="alert" className="error">
           {error}
@@ -272,7 +354,8 @@ export function AppealsPage({
                   </td>
                   <td>
                     <div className="actions">
-                      <button onClick={() => setOpen(a.report_id)}>
+                      <button className="info" onClick={() => setOpen(a.report_id)}>
+                        <Icon name="eye" size={14} />
                         Review
                       </button>
                     </div>
@@ -283,6 +366,7 @@ export function AppealsPage({
           </tbody>
         </table>
       </div>
+      {rows && <Pager page={list.page} setPage={list.setPage} count={rows.length} />}
       {open && (
         <ReportCase
           id={open}
@@ -300,7 +384,7 @@ export function AppealsPage({
 
 // ── One case ────────────────────────────────────────────────────────────────
 
-type Pane = null | "actions" | "dismiss" | "confirm" | "accept" | "reject";
+type Pane = null | "actions" | "dismiss" | "confirm" | "accept" | "reject" | "email";
 
 function ReportCase({
   id,
@@ -329,6 +413,16 @@ function ReportCase({
   const [note, setNote] = useState("");
   const [deleteContent, setDeleteContent] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [notifyReporters, setNotifyReporters] = useState(true);
+  const [notice, setNotice] = useState("");
+  const side = useRef<HTMLElement>(null);
+
+  /** Open a form in the side column, right where the buttons were, and bring it into view. */
+  function openPane(next: Pane) {
+    setNotice("");
+    setPane(next);
+    requestAnimationFrame(() => side.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+  }
 
   async function load() {
     try {
@@ -423,7 +517,7 @@ function ReportCase({
             </div>
             {data.audiobook && (
               <button
-                className="secondary"
+                className="info"
                 onClick={() => listen(data.audiobook.id)}
               >
                 <Icon name="play" size={14} />
@@ -436,6 +530,7 @@ function ReportCase({
               <dt>Reported by</dt>
               <dd>
                 {who(data.reporter)}
+                {data.reporter?.email && <div className="subtle">{data.reporter.email}</div>}
                 {data.reporter_dismissed_reports > 0 && (
                   <span className="subtle">
                     {" "}
@@ -445,7 +540,10 @@ function ReportCase({
                 )}
               </dd>
               <dt>Content owner</dt>
-              <dd>{who(data.owner)}</dd>
+              <dd>
+                {who(data.owner)}
+                {data.owner?.email && <div className="subtle">{data.owner.email}</div>}
+              </dd>
               <dt>Report date</dt>
               <dd>{dateTime(data.created_at)}</dd>
               {data.violation && (
@@ -469,24 +567,7 @@ function ReportCase({
             {data.evidence.length > 0 && (
               <>
                 <h4>Evidence</h4>
-                <ul className="files">
-                  {data.evidence.map((f: Row) => (
-                    <li key={f.id}>
-                      <button
-                        className="link"
-                        onClick={() =>
-                          openFile(
-                            `/admin/moderation/evidence/${f.id}`,
-                            setError,
-                          )
-                        }
-                      >
-                        <Icon name="document" size={14} />
-                        {f.filename}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <EvidenceList files={data.evidence} />
               </>
             )}
           </section>
@@ -522,26 +603,7 @@ function ReportCase({
                 <dd>{dateTime(appeal.created_at)}</dd>
               </dl>
               <p className="quote">{appeal.explanation}</p>
-              {appeal.evidence.length > 0 && (
-                <ul className="files">
-                  {appeal.evidence.map((f: Row) => (
-                    <li key={f.id}>
-                      <button
-                        className="link"
-                        onClick={() =>
-                          openFile(
-                            `/admin/moderation/evidence/${f.id}`,
-                            setError,
-                          )
-                        }
-                      >
-                        <Icon name="document" size={14} />
-                        {f.filename}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {appeal.evidence.length > 0 && <EvidenceList files={appeal.evidence} />}
               {appeal.decision_note && (
                 <p className="subtle">Decision note: {appeal.decision_note}</p>
               )}
@@ -591,21 +653,14 @@ function ReportCase({
           </section>
         </div>
 
-        <aside className="case-side">
-          {record && (
-            <RecordSummary
-              record={record}
-              onChanged={load}
-              setError={setError}
-            />
-          )}
-
+        <aside className="case-side" ref={side}>
+          {!pane && (
           <section className="case-section">
             <h4>Decision</h4>
             <div className="stack">
               {data.status === "pending" && (
                 <button
-                  className="secondary"
+                  className="info"
                   disabled={busy}
                   onClick={() => send(`/admin/reports/${id}/review`, {})}
                 >
@@ -613,7 +668,7 @@ function ReportCase({
                 </button>
               )}
               {(open || data.status === "action_taken") && (
-                <button disabled={busy} onClick={() => setPane("actions")}>
+                <button className="warn" disabled={busy} onClick={() => openPane("actions")}>
                   Take action
                 </button>
               )}
@@ -621,20 +676,24 @@ function ReportCase({
                 <button
                   className="secondary"
                   disabled={busy}
-                  onClick={() => setPane("dismiss")}
+                  onClick={() => openPane("dismiss")}
                 >
                   Dismiss report
                 </button>
               )}
               {(open || data.status === "action_taken") && (
                 <button
-                  className="secondary"
+                  className="danger"
                   disabled={busy}
-                  onClick={() => setPane("confirm")}
+                  onClick={() => openPane("confirm")}
                 >
                   Confirm violation
                 </button>
               )}
+              <button className="info" disabled={busy} onClick={() => openPane("email")}>
+                <Icon name="mail" size={14} />
+                Email owner / reporter
+              </button>
               {data.status === "action_taken" && windowClosed && (
                 <p className="subtle">
                   The appeal window has closed. The case can be finalised.
@@ -642,13 +701,13 @@ function ReportCase({
               )}
               {appeal?.status === "pending" && (
                 <>
-                  <button disabled={busy} onClick={() => setPane("accept")}>
+                  <button className="success" disabled={busy} onClick={() => openPane("accept")}>
                     Accept appeal
                   </button>
                   <button
                     className="danger"
                     disabled={busy}
-                    onClick={() => setPane("reject")}
+                    onClick={() => openPane("reject")}
                   >
                     Reject appeal
                   </button>
@@ -657,10 +716,23 @@ function ReportCase({
               {!open && !["action_taken", "appealed"].includes(data.status) && (
                 <p className="subtle">This case is closed.</p>
               )}
+              {notice && <p className="notice small">{notice}</p>}
             </div>
           </section>
-        </aside>
-      </div>
+          )}
+
+          {pane === "email" && (
+            <EmailPane
+              reportId={id}
+              hasReporter={!!data.reporter && data.reporter.id !== data.owner?.id}
+              cancel={() => setPane(null)}
+              sent={(message) => {
+                setPane(null);
+                setNotice(message);
+                load();
+              }}
+            />
+          )}
 
       {pane === "actions" && (
         <form
@@ -675,6 +747,7 @@ function ReportCase({
               flag_note: flag ? flagNote : "",
               message,
               note,
+              notify_reporters: notifyReporters,
             });
           }}
         >
@@ -703,6 +776,14 @@ function ReportCase({
               onChange={(e) => setNotify(e.target.checked)}
             />
             Notify the owner (moderation notice with a 7-day appeal window)
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={notifyReporters}
+              onChange={(e) => setNotifyReporters(e.target.checked)}
+            />
+            Tell the reporter(s) that action was taken
           </label>
           <label className="check">
             <input
@@ -913,7 +994,84 @@ function ReportCase({
           </div>
         </form>
       )}
+
+          {record && <RecordSummary record={record} onChanged={load} setError={setError} />}
+        </aside>
+      </div>
     </Modal>
+  );
+}
+
+/** Write to the content owner and/or the reporter. It is emailed and kept in their notifications. */
+function EmailPane({
+  reportId,
+  hasReporter,
+  cancel,
+  sent,
+}: {
+  reportId: string;
+  hasReporter: boolean;
+  cancel: () => void;
+  sent: (message: string) => void;
+}) {
+  const [to, setTo] = useState(hasReporter ? "both" : "owner");
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <form
+      className="decision panel-inline"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError("");
+        try {
+          const result = await request(`/admin/reports/${reportId}/email`, "POST", { to, subject, message });
+          sent(
+            result.mail_configured
+              ? `Emailed ${result.emailed} recipient(s) and added it to their notifications.`
+              : "Email is not configured on the server, so the message was added to their in-app notifications only.",
+          );
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <h4>Email about this case</h4>
+      {error && <div className="error">{error}</div>}
+      <label>
+        Send to
+        <select value={to} onChange={(e) => setTo(e.target.value)}>
+          <option value="owner">Content owner</option>
+          {hasReporter && <option value="reporter">Reporter</option>}
+          {hasReporter && <option value="both">Owner and reporter</option>}
+        </select>
+      </label>
+      <label>
+        Subject
+        <input required minLength={3} maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      </label>
+      <label>
+        Message
+        <textarea required minLength={3} maxLength={5000} value={message} onChange={(e) => setMessage(e.target.value)} />
+      </label>
+      <p className="subtle">
+        Decisions (actions, dismissals, confirmed violations, appeal results) are emailed automatically; use this for
+        anything extra.
+      </p>
+      <div className="modal-actions">
+        <button type="button" className="secondary" onClick={cancel}>
+          Cancel
+        </button>
+        <button className="info" disabled={busy}>
+          <Icon name="mail" size={14} />
+          {busy ? "Sending…" : "Send"}
+        </button>
+      </div>
+    </form>
   );
 }
 

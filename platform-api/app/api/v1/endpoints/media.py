@@ -52,7 +52,10 @@ async def play(id: UUID, db: DatabaseDep, user: CurrentUserDep, session_id: UUID
     items = [{"id": str(c.id), "title": c.title, "chapter_number": c.chapter_number,
               "duration_seconds": c.duration_seconds,
               "audio_url": f"/api/v1/media/{id}/{c.id}?grant={token}"} for c in chapters if c.audio_url]
-    return {"session_id": session.id, "chapters": items, "expires_in": 900}
+    # While a book is still being generated its last chapter keeps growing; the app
+    # re-fetches this manifest to continue seamlessly into the new audio.
+    generating = book.status in (AudiobookStatus.PENDING, AudiobookStatus.PROCESSING)
+    return {"session_id": session.id, "chapters": items, "expires_in": 900, "generating": generating}
 
 @router.get("/media/{book_id}/{chapter_id}")
 async def stream(book_id: UUID, chapter_id: UUID, grant: str, db: DatabaseDep):
@@ -110,6 +113,13 @@ async def heartbeat(id: UUID, data: HeartbeatInput, db: DatabaseDep, user: Curre
             EligibleView.audiobook_id == book.id, EligibleView.month == month_now()))
         if not exists:
             db.add(EligibleView(user_id=user.id, audiobook_id=book.id, publisher_id=book.owner_id, month=month_now()))
+        # Daily earnings count one listen per listener, audiobook and day.
+        from app.models.platform import DailyListen
+        from app.services.billing import today_dhaka
+        day = today_dhaka()
+        if not await db.scalar(select(DailyListen.id).where(DailyListen.user_id == user.id,
+                                                            DailyListen.audiobook_id == book.id, DailyListen.day == day)):
+            db.add(DailyListen(user_id=user.id, audiobook_id=book.id, publisher_id=book.owner_id, day=day))
     await db.commit()
     return {"listened_seconds": row.seconds}
 

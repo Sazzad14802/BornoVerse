@@ -2,12 +2,13 @@
 import asyncio
 import io
 import logging
+import re
 import wave
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import httpx
 from pypdf import PdfReader, PdfWriter
-from sqlalchemy import select
+from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.database import async_session_maker
 from app.models import GenerationJob, Audiobook, AudiobookStatus, Chapter, User
@@ -37,6 +38,111 @@ async def renew(id, token):
             job.lease_until = datetime.now(timezone.utc) + timedelta(seconds=policy["lease_seconds"])
             await db.commit()
 
+HEADING = re.compile(r"^\s*#{1,3}\s+(.+?)\s*#*\s*$")
+
+
+def split_chapters(text: str) -> list[tuple[str | None, str]]:
+    """Split one OCR'd page into (chapter title, text to narrate) parts.
+
+    The OCR marks chapter/section titles with '## '. Text before the first title
+    continues the chapter of the previous page (title None); each title starts a
+    new chapter, and the title itself is narrated at its start. A chapter can span
+    many pages, and one page can hold the end of one chapter and the start of the next.
+    """
+    parts: list[tuple[str | None, list[str]]] = [(None, [])]
+    for line in text.splitlines():
+        match = HEADING.match(line)
+        if match:
+            title = match.group(1).strip().strip("*").strip()[:200]
+            parts.append((title, [title + ("।" if title[-1:] not in "।.?!:" else "")]))
+        else:
+            parts[-1][1].append(line)
+    result = []
+    for title, lines in parts:
+        body = "\n".join(lines).strip()
+        if body:
+            result.append((title, body))
+    return result
+
+
+def wav_frames(data: bytes) -> tuple[tuple, bytes]:
+    with wave.open(io.BytesIO(data), "rb") as audio:
+        return (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()), audio.readframes(audio.getnframes())
+
+
+def wav_bytes(params: tuple, frames: bytes) -> bytes:
+    out = io.BytesIO()
+    with wave.open(out, "wb") as audio:
+        audio.setnchannels(params[0])
+        audio.setsampwidth(params[1])
+        audio.setframerate(params[2])
+        audio.writeframes(frames)
+    return out.getvalue()
+
+
+async def append_page(id, token, book_id, book_title, index, parts):
+    """Commit one page: each part is appended to the open chapter or starts a new one.
+
+    A growing chapter gets a new file holding everything so far, so a listener
+    already in it keeps playing and continues into the new audio. The book is
+    playable from its first page on."""
+    storage = get_storage_service()
+    folder = Path(settings.UPLOAD_DIR) / "audio"
+    folder.mkdir(parents=True, exist_ok=True)
+    replaced, notice = [], None
+    async with async_session_maker() as db:
+        job = await fenced(db, id, token)
+        chapters = (await db.scalars(select(Chapter).where(Chapter.audiobook_id == book_id)
+                                     .order_by(Chapter.chapter_number))).all()
+        current = chapters[-1] if chapters else None
+        number = current.chapter_number if current else 0
+        for position, (title, audio) in enumerate(parts):
+            params, frames = wav_frames(audio)
+            previous = None
+            if title is None and current and current.audio_url:
+                path = await storage.get_file_path(current.audio_url)
+                if path:
+                    old_params, old_frames = wav_frames(await asyncio.to_thread(Path(path).read_bytes))
+                    if old_params == params:
+                        previous = old_frames
+            if title is not None or current is None or previous is None and current.audio_url:
+                number += 1
+                fallback = book_title if number == 1 else f"Part {number}"
+                current = Chapter(audiobook_id=book_id, title=(title or fallback)[:255], chapter_number=number)
+                db.add(current)
+            elif previous is not None:
+                replaced.append(current.audio_url)
+                frames = previous + frames
+            output = folder / f"{id}-{token}-c{number}-p{index + 1}-{position}.wav"
+            await asyncio.to_thread(output.write_bytes, wav_bytes(params, frames))
+            key = f"/uploads/audio/{output.name}"
+            await storage.persist(key)
+            current.audio_url = key
+            current.duration_seconds = len(frames) / (params[0] * params[1] * params[2])
+        await db.flush()
+        book = await db.get(Audiobook, book_id)
+        total = await db.scalar(select(func.coalesce(func.sum(Chapter.duration_seconds), 0))
+                                .where(Chapter.audiobook_id == book_id))
+        first_audio = not book.duration_seconds
+        book.duration_seconds = float(total or 0)
+        book.audio_url = None  # played through its ordered chapters
+        job.completed_pages = index + 1
+        if first_audio and job.total_pages > index + 1:
+            notice = notify(db, job.owner_id, "generation.first_ready", "শোনা শুরু করতে পারেন",
+                            f"«{book.title}»-এর প্রথম অংশ প্রস্তুত। বাকিটা তৈরি হতে হতেই শোনা চালিয়ে যাবে।",
+                            en=("Start listening now",
+                                f"The first part of “{book.title}” is ready. The rest plays on as it is generated."),
+                            audiobook_id=book.id, job_id=job.id)
+        await db.commit()
+        await deliver(db, [notice])
+    # The superseded shorter versions are no longer referenced.
+    for key in replaced:
+        try:
+            await storage.delete_file(key)
+        except Exception:
+            log.debug("Could not remove old chapter audio %s", key)
+
+
 async def process(id, token):
     heartbeat = asyncio.create_task(renew(id, token))
     pending = None
@@ -45,7 +151,7 @@ async def process(id, token):
             job = await fenced(db, id, token)
             book = await db.get(Audiobook, job.audiobook_id)
             book.status = AudiobookStatus.PROCESSING
-            book_id, language, completed = book.id, book.language, job.completed_pages
+            book_id, book_title, language, completed = book.id, book.title, book.language, job.completed_pages
             path = await get_storage_service().get_file_path(book.source_file_url)
             await db.commit()
         reader = await asyncio.to_thread(PdfReader, path)
@@ -58,34 +164,26 @@ async def process(id, token):
                 response = await client.post(settings.TTS_EXTRACT_URL, files={"file": ("page.pdf", buffer.getvalue(), "application/pdf")}, data={"language": language})
                 response.raise_for_status()
                 return response.json()["text"]
+            async def speak(text):
+                response = await client.post(settings.TTS_GENERATE_URL, json={"text": text, "language": language})
+                response.raise_for_status()
+                return response.content
+
+            # The next page is read (OCR) while the current one is narrated.
             if completed < len(reader.pages):
                 pending = asyncio.create_task(extract(completed))
             for index in range(completed, len(reader.pages)):
                 text = await pending
                 pending = asyncio.create_task(extract(index + 1)) if index + 1 < len(reader.pages) else None
-                audio_key, duration = None, 0
-                if text.strip():
-                    response = await client.post(settings.TTS_GENERATE_URL, json={"text": text, "language": language})
-                    response.raise_for_status()
-                    with wave.open(io.BytesIO(response.content), "rb") as audio:
-                        duration = audio.getnframes() / audio.getframerate()
-                    folder = Path(settings.UPLOAD_DIR) / "audio"
-                    folder.mkdir(parents=True, exist_ok=True)
-                    output = folder / f"{id}-{token}-{index+1}.wav"
-                    await asyncio.to_thread(output.write_bytes, response.content)
-                    audio_key = f"/uploads/audio/{output.name}"
-                    await get_storage_service().persist(audio_key)
-                async with async_session_maker() as db:
-                    job = await fenced(db, id, token)
-                    # A page is committed atomically with its ordered audio chunk.
-                    chapter = await db.scalar(select(Chapter).where(Chapter.audiobook_id == book_id, Chapter.chapter_number == index + 1))
-                    if audio_key:
-                        if not chapter:
-                            chapter = Chapter(audiobook_id=book_id, title=f"Page {index+1}", chapter_number=index+1)
-                            db.add(chapter)
-                        chapter.audio_url, chapter.duration_seconds = audio_key, duration
-                    job.completed_pages = index + 1
-                    await db.commit()
+                # Narrate every part of the page first, then commit the page in one step.
+                parts = [(title, await speak(body)) for title, body in split_chapters(text)]
+                if parts:
+                    await append_page(id, token, book_id, book_title, index, parts)
+                else:
+                    async with async_session_maker() as db:
+                        job = await fenced(db, id, token)
+                        job.completed_pages = index + 1
+                        await db.commit()
             async with async_session_maker() as db:
                 job = await fenced(db, id, token)
                 book = await db.get(Audiobook, book_id)

@@ -60,9 +60,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const user = await authApi.me();
           await authStorage.saveUser(user);
           if (mounted) setState({ user, token, isLoading: false, isAuthenticated: true });
+          // Stay signed in until the user signs out: renew the token on every launch.
+          authApi
+            .renewSession()
+            .then(async (fresh) => {
+              await authStorage.saveToken(fresh.access_token);
+              if (mounted) setState((s) => (s.isAuthenticated ? { ...s, token: fresh.access_token } : s));
+            })
+            .catch(() => {});
         } catch (error) {
-          // Offline: keep the cached session so downloads stay playable.
-          if (error instanceof ApiError && error.isNetworkError) {
+          // Only a rejected session signs the user out. Offline, a sleeping server
+          // (5xx) or a timeout keep the cached session, so the user stays signed in.
+          const rejected = error instanceof ApiError && (error.status === 401 || error.status === 403);
+          if (!rejected) {
             const cached = await authStorage.getUser();
             if (cached && mounted) setState({ user: cached, token, isLoading: false, isAuthenticated: true });
             return;

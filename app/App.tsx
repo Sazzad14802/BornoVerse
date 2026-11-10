@@ -12,7 +12,7 @@ import { PlayerProvider } from './src/contexts/PlayerContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { SheetHost } from './src/components/ModalBottomSheet';
 import { AppAlertHost } from './src/components/AppAlert';
-import { KeyboardInset } from './src/components/KeyboardInset';
+import { KeyboardHeightProvider, KeyboardInset } from './src/components/KeyboardInset';
 
 export default function App() {
   return (
@@ -21,13 +21,15 @@ export default function App() {
         <AuthProvider>
           <NotificationsProvider>
             <PlayerProvider>
-              {/* Bottom sheets are drawn here, above every screen and the tab bar. */}
-              {/* Lifts screens and sheets above the keyboard (Android is edge to edge). */}
-              <KeyboardInset>
+              {/* Screens get keyboard padding (Android is edge to edge); bottom sheets are */}
+              {/* drawn above every screen and the tab bar and lift themselves over the keyboard. */}
+              <KeyboardHeightProvider>
                 <SheetHost>
-                  <AppNavigator />
+                  <KeyboardInset>
+                    <AppNavigator />
+                  </KeyboardInset>
                 </SheetHost>
-              </KeyboardInset>
+              </KeyboardHeightProvider>
               <AppAlertHost />
               <StatusBar style="dark" />
             </PlayerProvider>

@@ -12,6 +12,8 @@ os.environ["SSLCOMMERZ_STORE_ID"] = ""
 os.environ["SSLCOMMERZ_STORE_PASSWORD"] = ""
 os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
+os.environ["BREVO_API_KEY"] = ""
+os.environ["SMTP_HOST"] = ""
 from collections.abc import AsyncGenerator
 import pytest
 from httpx import ASGITransport, AsyncClient

@@ -12,7 +12,7 @@
 
 import React, { useState } from 'react';
 import { AppAlert } from '../../components/AppAlert';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
@@ -124,8 +124,8 @@ export function PublisherScreen() {
       AppAlert.alert(
         tx('তোলার মতো টাকা নেই', 'Nothing to withdraw yet'),
         tx(
-          'প্রতি মাস শেষ হলে সেই মাসের প্রিমিয়াম আয়ের অংশ আপনার ব্যালান্সে যোগ হয়। তারপর এখান থেকে তুলতে পারবেন।',
-          'When a month ends, your share of that month’s Premium income is added to your balance. You can withdraw it here then.',
+          'প্রতিদিন শেষে সেদিন আপনার কনটেন্ট যতটা শোনা হয়েছে, সেই অনুপাতে প্রিমিয়াম আয়ের অংশ ব্যালান্সে যোগ হয়। ব্যালান্সে টাকা এলেই যেকোনো সময় তুলতে পারবেন।',
+          'At the end of every day, your share of that day’s Premium income (by how much your content was listened to) is added to your balance. You can withdraw any time once there is money in it.',
         ),
       );
       return;
@@ -199,6 +199,22 @@ export function PublisherScreen() {
   const underAction = standing?.cases.filter((c) => c.status === 'action_taken') ?? [];
   const showWarning = !!restrictedUntil || underAction.length > 0;
   const hasAppeals = (data.data?.appeals.length ?? 0) > 0;
+  const appealHistory = (
+    <Pressable
+      onPress={() => navigation.navigate('Appeals')}
+      style={({ pressed }) => [styles.appealRow, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={tx('আপিলের ইতিহাস', 'Appeal history')}
+    >
+      <Ionicons name="document-text-outline" size={18} color={Colors.primary} />
+      <Text style={styles.appealText}>{tx('আপিলের ইতিহাস', 'Appeal history')}</Text>
+      <View style={styles.appealCount}>
+        <Text style={styles.appealCountText}>{data.data?.appeals.length ?? 0}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+    </Pressable>
+  );
+  const today = dashboard?.this_month.today;
 
   const deleteChannel = (channel: Channel) =>
     AppAlert.alert(
@@ -267,18 +283,7 @@ export function PublisherScreen() {
           </View>
         ) : null}
 
-        {hasAppeals ? (
-          <FormCard style={styles.list}>
-            <ListRow
-              icon="document-text-outline"
-              title={tx('আপিলের ইতিহাস', 'Appeal history')}
-              subtitle={tx('আগের ও চলমান আপিল, বিস্তারিত সহ', 'Past and running appeals, with details')}
-              value={String(data.data?.appeals.length ?? '')}
-              onPress={() => navigation.navigate('Appeals')}
-              last
-            />
-          </FormCard>
-        ) : null}
+        {hasAppeals && !(active && dashboard && myChannel) ? appealHistory : null}
 
         {active ? null : (
         <View style={styles.steps}>
@@ -380,7 +385,7 @@ export function PublisherScreen() {
               <View style={styles.earningsRow}>
                 <View style={styles.earningsItem}>
                   <Text style={styles.earningsSmallValue}>{formatMoney(dashboard.this_month.estimated)}</Text>
-                  <Text style={styles.earningsSmallLabel}>{tx('এ মাসে (আনুমানিক)', 'This month (estimate)')}</Text>
+                  <Text style={styles.earningsSmallLabel}>{tx('এ মাসে (আজসহ)', 'This month (incl. today)')}</Text>
                 </View>
                 <View style={styles.earningsItem}>
                   <Text style={styles.earningsSmallValue}>{formatMoney(dashboard.lifetime_earned)}</Text>
@@ -397,13 +402,20 @@ export function PublisherScreen() {
                 </Text>
               ) : null}
               <Text style={styles.earningsNote}>
-                {tx(
-                  `এ মাসে আপনার ${dashboard.this_month.eligible_views}টি যোগ্য শোনা (সবার ${dashboard.this_month.all_eligible_views}টি)। মাস শেষে প্রিমিয়াম আয়ের ${dashboard.this_month.publisher_percent}% শোনার অনুপাতে ভাগ হয়।`,
-                  `${dashboard.this_month.eligible_views} of ${dashboard.this_month.all_eligible_views} eligible listens this month are yours. At month end, ${dashboard.this_month.publisher_percent}% of Premium income is shared by listens.`,
-                )}
+                {today
+                  ? tx(
+                      `আজ এ পর্যন্ত: আনুমানিক ${formatMoney(today.estimated)} (আপনার ${today.listens}টি যোগ্য শোনা, সবার ${today.all_listens}টি)। প্রতিদিন শেষে সেদিনের প্রিমিয়াম আয়ের ${dashboard.this_month.publisher_percent}% শোনার অনুপাতে ভাগ হয়ে ব্যালান্সে যোগ হয় — যেকোনো সময় তুলতে পারবেন।`,
+                      `Today so far: about ${formatMoney(today.estimated)} (${today.listens} of ${today.all_listens} eligible listens are yours). At the end of each day, ${dashboard.this_month.publisher_percent}% of that day's Premium income is shared by listens and added to your balance — withdraw any time.`,
+                    )
+                  : tx(
+                      `এ মাসে আপনার ${dashboard.this_month.eligible_views}টি যোগ্য শোনা (সবার ${dashboard.this_month.all_eligible_views}টি)।`,
+                      `${dashboard.this_month.eligible_views} of ${dashboard.this_month.all_eligible_views} eligible listens this month are yours.`,
+                    )}
               </Text>
               <AppButton label={tx('টাকা তোলার অনুরোধ', 'Request withdrawal')} icon="cash-outline" onPress={openWithdraw} />
             </View>
+
+            {hasAppeals ? appealHistory : null}
 
             <FormCard style={styles.list}>
               <ListRow
@@ -742,6 +754,40 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: Spacing.xs,
+  },
+  appealRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.surfaceBorder,
+    backgroundColor: Colors.surface,
+  },
+  appealText: {
+    flex: 1,
+    fontSize: FontSizes.sm,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  appealCount: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    backgroundColor: Colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appealCountText: {
+    fontSize: FontSizes.xs,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   listHeader: {
     flexDirection: 'row',

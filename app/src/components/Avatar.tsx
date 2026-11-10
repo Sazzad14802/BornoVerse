@@ -31,17 +31,27 @@ interface AvatarProps {
   ring?: boolean;
 }
 
+/** Width of the "following" ring and the gap between it and the picture. */
+const RING = 2.5;
+const RING_GAP = 2.5;
+
 export function Avatar({ name, uri, size = 44, editable, ring }: AvatarProps) {
   const [failed, setFailed] = useState(false);
   const source = resolveMediaUrl(uri);
-  const frame = { width: size, height: size, borderRadius: size / 2 };
+  const outer = { width: size, height: size, borderRadius: size / 2 };
+  // With a ring the picture shrinks inside it, so the avatar keeps its size and the
+  // ring is its own round view: a border on the picture's view was sometimes drawn
+  // square on Android, around images that loaded later than the view.
+  const inner = ring ? size - 2 * (RING + RING_GAP) : size;
+  const frame = { width: inner, height: inner, borderRadius: inner / 2, overflow: 'hidden' as const };
   return (
-    <View style={[frame, ring && styles.ring]}>
+    <View style={[outer, styles.center]}>
+      {ring ? <View pointerEvents="none" style={[outer, styles.ring]} /> : null}
       {source && !failed ? (
         <Image source={{ uri: source }} style={[frame, styles.image]} onError={() => setFailed(true)} />
       ) : (
         <View style={[frame, styles.fallback]}>
-          <Text style={[styles.initials, { fontSize: Math.round(size * 0.38) }]}>{initialsOf(name)}</Text>
+          <Text style={[styles.initials, { fontSize: Math.round(inner * 0.38) }]}>{initialsOf(name)}</Text>
         </View>
       )}
       {editable ? (
@@ -66,9 +76,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textOnPrimary,
   },
+  center: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   ring: {
-    borderWidth: 3,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    borderWidth: RING,
     borderColor: Colors.brandLight,
+    backgroundColor: 'transparent',
   },
   badge: {
     position: 'absolute',
