@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     GEMINI_TTS_ONLY: bool = True
 
     @property
+    def tts_model(self) -> str:
+        """The narration model. A non-speech model name (e.g. an old
+        GEMINI_TTS_MODEL=gemini-2.0-flash left in a host's settings) cannot return
+        audio, so it is replaced by the speech model instead of failing every page."""
+        name = (self.GEMINI_TTS_MODEL or "").strip().strip("\"'")
+        return name if "tts" in name.lower() else "gemini-3.8-flash-tts"
+
+    @property
     def effective_gemini_api_key(self) -> str:
         keys = self.gemini_api_keys
         return keys[0] if keys else ""
@@ -38,7 +46,9 @@ class Settings(BaseSettings):
         import os
         import re
         raw = ",".join([self.GEMINI_API_KEY, self.GEMINI_API_KEYS, os.environ.get("GOOGLE_API_KEY", "")])
-        return list(dict.fromkeys(k.strip() for k in re.split(r"[,\s]+", raw) if k.strip()))
+        # Tolerate pasted quotes and ; or newline separators (hosting dashboards).
+        keys = (k.strip().strip("\"'") for k in re.split(r"[,;\s]+", raw))
+        return list(dict.fromkeys(k for k in keys if k))
 
     # Model Configurations
     BANGLA_MODEL_REPO: str = "EMTIAZZ/bangladeshi-bangla-tts-vits"

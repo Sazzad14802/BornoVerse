@@ -211,10 +211,11 @@ def generate_audio(request: TextRequest):
 def quota():
     """How many TTS requests each Gemini key has used today (keys are masked)."""
     from app.services.gemini_service import gemini_service
-    model = settings.GEMINI_TTS_MODEL
+    model = settings.tts_model
     keys = gemini_service.pool.status(model)
     left = sum(max(0, k["limit"] - k["used_today"]) for k in keys if not k["exhausted"])
-    return {"model": model, "keys": keys, "requests_left_today": left}
+    return {"model": model, "configured_tts_model": settings.GEMINI_TTS_MODEL, "ocr_model": settings.GEMINI_OCR_MODEL,
+            "keys": keys, "requests_left_today": left}
 
 
 @app.post("/jobs", response_model=JobStatusResponse)

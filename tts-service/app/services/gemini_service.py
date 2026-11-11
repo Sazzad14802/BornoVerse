@@ -229,10 +229,11 @@ class GeminiService:
         from google.genai import types
         import time
         from app.services.key_pool import is_bad_key, is_rate_limit, mask
-        transient = 0
+        transient = no_audio = 0
+        self.last_error = ""
 
-        # Only the configured TTS model (gemini-3.8-flash-tts); keys rotate within its quota.
-        model = settings.GEMINI_TTS_MODEL
+        # Only the speech model (gemini-3.8-flash-tts); keys rotate within its quota.
+        model = settings.tts_model
 
         # Send only the text to narrate: TTS models speak the whole prompt, so any
         # instruction placed here would be read aloud at the start of the audio.
@@ -277,7 +278,14 @@ class GeminiService:
                             return wav_data
 
                 # The TTS model sometimes answers without audio; another try usually works.
-                logger.warning("Gemini returned no audio for this text (key %s); retrying", mask(key))
+                candidate = (response.candidates or [None])[0]
+                feedback = getattr(response, "prompt_feedback", None)
+                self.last_error = (f"no audio (finish reason {getattr(candidate, 'finish_reason', None)}"
+                                   f"{', blocked: ' + str(feedback.block_reason) if feedback and feedback.block_reason else ''})")
+                no_audio += 1
+                logger.warning("Gemini %s for this text (key %s, model %s)", self.last_error, mask(key), model)
+                if no_audio >= 3:
+                    return None
                 time.sleep(2)
             except Exception as exc:
                 if is_rate_limit(exc):
@@ -289,7 +297,8 @@ class GeminiService:
                 # Overloaded (500/503), timeouts and other passing errors: back off and try
                 # again (on the next key); give up after a few attempts.
                 transient += 1
-                logger.warning("Gemini TTS error (attempt %d) with key %s: %s", transient, mask(key), exc)
+                self.last_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+                logger.warning("Gemini TTS error (attempt %d) with key %s, model %s: %s", transient, mask(key), model, exc)
                 if transient >= 4:
                     return None
                 time.sleep(min(20, 3 * 2 ** (transient - 1)))
@@ -333,7 +342,7 @@ class GeminiService:
             except Exception as exc:
                 logger.warning("Gemini synthesis attempt encountered error: %s", exc)
             if not wav_bytes and settings.GEMINI_TTS_ONLY:
-                raise RuntimeError("Gemini TTS did not return audio")
+                raise RuntimeError(f"Gemini TTS ({settings.tts_model}) did not return audio: {getattr(self, 'last_error', '') or 'unknown reason'}")
 
         # 2. Neural Bengali / English TTS fallback (Edge TTS)
         if not wav_bytes:
