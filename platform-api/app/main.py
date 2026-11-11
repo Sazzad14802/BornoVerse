@@ -55,8 +55,19 @@ def create_app() -> FastAPI:
     # HEAD as well as GET: uptime monitors (UptimeRobot) send HEAD requests.
     @app.api_route("/health", methods=["GET", "HEAD"], tags=["health"], summary="Health check")
     async def health() -> dict:
-        """Returns a simple OK response to confirm the API is alive and running."""
-        return {"status": "ok", "version": settings.APP_VERSION}
+        """The API is alive; `tts` says whether the voice/OCR service answers too
+        (on Render it only listens inside the container, so this is the way to see it).
+        Always 200, so a slow TTS start never makes the host restart the API."""
+        import httpx
+        from urllib.parse import urlsplit
+        parts = urlsplit(settings.TTS_GENERATE_URL)
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                response = await client.get(f"{parts.scheme}://{parts.netloc}/health")
+            tts = "ok" if response.status_code == 200 else f"error {response.status_code}"
+        except httpx.HTTPError:
+            tts = "not running"
+        return {"status": "ok", "version": settings.APP_VERSION, "tts": tts}
 
     # ── Root redirect to documentation ─────────────────────────────────────
     @app.get("/", include_in_schema=False)
