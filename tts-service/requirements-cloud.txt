@@ -14,3 +14,4 @@ edge-tts>=7.3.0
 gTTS>=2.5.0
 miniaudio>=1.71
 Pillow>=10.0
+tzdata>=2024.1

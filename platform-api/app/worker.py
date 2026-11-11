@@ -38,6 +38,34 @@ async def renew(id, token):
             job.lease_until = datetime.now(timezone.utc) + timedelta(seconds=policy["lease_seconds"])
             await db.commit()
 
+# 12 minutes of 24 kHz mono 16-bit WAV is about 35 MB: under Supabase's 50 MB upload
+# limit, and small enough to join in memory on a 512 MB instance.
+MAX_CHAPTER_SECONDS = 12 * 60
+
+
+def failure_reason(exc: Exception) -> str:
+    """A short, readable reason for the generation screen (no secrets, no stack)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail = ""
+        try:
+            detail = str(exc.response.json().get("detail", ""))[:160]
+        except Exception:
+            detail = exc.response.text[:160]
+        where = "text reading (OCR)" if "extract" in str(exc.request.url) else "voice generation"
+        return f"{where} failed (HTTP {exc.response.status_code}) {detail}".strip()
+    if isinstance(exc, httpx.HTTPError):
+        return f"Could not reach the voice service ({type(exc).__name__})"
+    return f"{type(exc).__name__}: {str(exc)[:200]}"
+
+
+class QuotaWait(Exception):
+    """The TTS service has no quota left until `seconds` from now."""
+
+    def __init__(self, seconds: int):
+        super().__init__(f"TTS quota exhausted for {seconds}s")
+        self.seconds = max(60, seconds)
+
+
 HEADING = re.compile(r"^\s*#{1,3}\s+(.+?)\s*#*\s*$")
 
 
@@ -99,6 +127,14 @@ async def append_page(id, token, book_id, book_title, index, parts):
         for position, (title, audio) in enumerate(parts):
             params, frames = wav_frames(audio)
             previous = None
+            # A chapter's file is capped (storage upload limit, worker memory): past the
+            # cap the chapter continues in a "(part 2)" chapter that plays straight after.
+            too_long = bool(current and current.duration_seconds + len(frames) / (params[0] * params[1] * params[2])
+                            > MAX_CHAPTER_SECONDS)
+            if title is None and too_long:
+                base = re.sub(r" \(part \d+\)$", "", current.title)
+                part = int(m.group(1)) + 1 if (m := re.search(r"\(part (\d+)\)$", current.title)) else 2
+                title = f"{base} (part {part})"
             if title is None and current and current.audio_url:
                 path = await storage.get_file_path(current.audio_url)
                 if path:
@@ -166,6 +202,12 @@ async def process(id, token):
                 return response.json()["text"]
             async def speak(text):
                 response = await client.post(settings.TTS_GENERATE_URL, json={"text": text, "language": language})
+                if response.status_code == 429:
+                    try:
+                        retry_after = int(response.json().get("retry_after") or 0)
+                    except Exception:
+                        retry_after = 0
+                    raise QuotaWait(retry_after or int(response.headers.get("Retry-After", "3600")))
                 response.raise_for_status()
                 return response.content
 
@@ -206,14 +248,30 @@ async def process(id, token):
                 await deliver(db, [notice, *followers])
     except asyncio.CancelledError:
         log.info("Generation cancelled or lease lost: %s", id)
-    except Exception:
+    except QuotaWait as wait:
+        # Not a failure: every TTS key used its daily quota. Pause the job (pages done so
+        # far stay done and playable) and pick it up again after the reset.
+        log.warning("TTS quota used up; job %s resumes in %ss", id, wait.seconds)
+        async with async_session_maker() as db:
+            job = await db.scalar(select(GenerationJob).where(GenerationJob.id == id).with_for_update())
+            if job and job.lease_token == token and not job.cancelled:
+                job.status = AudiobookStatus.PENDING
+                job.attempts = max(0, job.attempts - 1)  # this turn does not count as an attempt
+                job.error_message = "Waiting for the daily voice quota to reset; generation continues automatically."
+                job.available_at = datetime.now(timezone.utc) + timedelta(seconds=wait.seconds)
+                job.lease_token = None
+                book = await db.get(Audiobook, job.audiobook_id)
+                book.status = AudiobookStatus.PROCESSING if job.completed_pages else AudiobookStatus.PENDING
+                await db.commit()
+    except Exception as exc:
         log.exception("Generation failed: %s", id)
         async with async_session_maker() as db:
             job = await db.scalar(select(GenerationJob).where(GenerationJob.id == id).with_for_update())
             if job and job.lease_token == token and not job.cancelled:
                 policy = await configuration(db)
                 job.status = AudiobookStatus.PENDING if job.attempts < policy["max_attempts"] else AudiobookStatus.FAILED
-                job.error_message = "Processing failed. See worker logs for details."
+                # Shown on the generation screen, so the cause is visible without server logs.
+                job.error_message = f"Page {job.completed_pages + 1}: {failure_reason(exc)}"[:500]
                 job.available_at = datetime.now(timezone.utc) + timedelta(seconds=30 * 2 ** job.attempts)
                 job.lease_token = None
                 book = await db.get(Audiobook, job.audiobook_id)

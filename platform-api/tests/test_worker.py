@@ -62,3 +62,40 @@ def test_pages_split_into_chapters_at_titles():
     ]
     assert worker.split_chapters("   \n") == []
     assert worker.split_chapters("## Chapter 3") == [("Chapter 3", "Chapter 3।")]
+
+
+async def test_quota_exhaustion_pauses_without_using_an_attempt(db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, 'UPLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(worker, 'async_session_maker', TestingSessionLocal)
+    writer = PdfWriter(); writer.add_blank_page(width=100, height=100)
+    writer.write(tmp_path / 'input.pdf')
+    user = User(username='quotauser', email='quota@example.com', password_hash='not-used'); db_session.add(user); await db_session.flush()
+    book = Audiobook(owner_id=user.id, title='Quota test', source_file_url='/uploads/input.pdf'); db_session.add(book); await db_session.flush()
+    job = GenerationJob(owner_id=user.id, audiobook_id=book.id, total_pages=1); db_session.add(job)
+    db_session.add(Setting(key='policy', value=DEFAULTS)); await db_session.commit()
+
+    class QuotaTTS:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def post(self, url, **kwargs):
+            request = httpx.Request('POST', url)
+            if url == settings.TTS_EXTRACT_URL:
+                return httpx.Response(200, json={'text': 'Some page'}, request=request)
+            return httpx.Response(429, json={'detail': 'quota', 'retry_after': 7200}, request=request)
+    monkeypatch.setattr(worker.httpx, 'AsyncClient', QuotaTTS)
+    lease = await claim(db_session); assert lease
+    await worker.process(*lease)
+    await db_session.refresh(job)
+    assert job.status == AudiobookStatus.PENDING and job.attempts == 0
+    assert 'quota' in job.error_message
+    available = job.available_at if job.available_at.tzinfo else job.available_at.replace(tzinfo=timezone.utc)
+    assert available > datetime.now(timezone.utc) + timedelta(seconds=7000)
+
+
+def test_failure_reason_is_readable():
+    request = httpx.Request('POST', settings.TTS_GENERATE_URL)
+    error = httpx.HTTPStatusError('boom', request=request,
+                                  response=httpx.Response(500, json={'detail': 'Gemini TTS did not return audio'}, request=request))
+    assert worker.failure_reason(error) == 'voice generation failed (HTTP 500) Gemini TTS did not return audio'
+    assert worker.failure_reason(ValueError('No readable text')) == 'ValueError: No readable text'

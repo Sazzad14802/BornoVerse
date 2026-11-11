@@ -97,6 +97,8 @@ class TTSService:
                     output_filename=output_filename,
                 )
             except Exception as exc:
+                if settings.GEMINI_TTS_ONLY:
+                    raise  # only the Gemini TTS voice is allowed: no local engine
                 logger.warning("Gemini synthesis pipeline failed: %s; trying local engine...", exc)
 
         if not output_filename:
