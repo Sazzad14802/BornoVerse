@@ -82,7 +82,11 @@ class GeminiService:
         """One Google GenAI client per API key (created on first use)."""
         if key not in self._clients:
             from google import genai
-            self._clients[key] = genai.Client(api_key=key)
+            from google.genai import types
+            # Always the v1beta API: speech output (speechConfig) and preview models
+            # only exist there. google-genai 3.x defaults to v1, where every TTS
+            # request fails with 400 'Unknown name "speechConfig"'.
+            self._clients[key] = genai.Client(api_key=key, http_options=types.HttpOptions(api_version="v1beta"))
         return self._clients[key]
 
     def get_genai_client(self):
