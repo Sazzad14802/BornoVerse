@@ -65,7 +65,10 @@ class GeminiService:
         else:
             self.output_dir = Path(__file__).resolve().parents[2] / settings.OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self._genai_client = None
+        self._clients: Dict[str, object] = {}
+        from app.services.key_pool import KeyPool
+        self.pool = KeyPool(settings.gemini_api_keys, settings.GEMINI_TTS_RPM, settings.GEMINI_TTS_RPD,
+                            self.output_dir / "gemini_key_usage.json")
 
     @property
     def api_key(self) -> str:
@@ -73,14 +76,18 @@ class GeminiService:
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.api_key)
+        return bool(settings.gemini_api_keys)
+
+    def client_for(self, key: str):
+        """One Google GenAI client per API key (created on first use)."""
+        if key not in self._clients:
+            from google import genai
+            self._clients[key] = genai.Client(api_key=key)
+        return self._clients[key]
 
     def get_genai_client(self):
-        """Lazy-loaded Google GenAI client instance."""
-        if self._genai_client is None and self.is_configured:
-            from google import genai
-            self._genai_client = genai.Client(api_key=self.api_key)
-        return self._genai_client
+        """Client for the first key (kept for callers that do not rotate)."""
+        return self.client_for(self.api_key) if self.is_configured else None
 
     def extract_text_from_pdf(self, pdf_bytes: bytes, language: str = "bn", mark_headings: bool = False) -> str:
         """
@@ -90,9 +97,6 @@ class GeminiService:
         if self.is_configured:
             try:
                 from google.genai import types
-                client = self.get_genai_client()
-                if client is None:
-                    raise RuntimeError("Gemini Client could not be initialized")
 
                 logger.info(
                     "Executing Gemini OCR (model: %s, size: %d bytes)...",
@@ -131,27 +135,34 @@ class GeminiService:
                     "gemini-3.1-flash-lite",
                     "gemini-3.8-flash",
                 ]
+                from app.services.key_pool import is_rate_limit, mask
                 extracted_text = ""
-                for ocr_model in candidate_ocr_models:
-                    try:
-                        logger.info("Executing Gemini OCR with model '%s' (size: %d bytes)...", ocr_model, len(pdf_bytes))
-                        response = client.models.generate_content(
-                            model=ocr_model,
-                            contents=[
-                                types.Part.from_bytes(
-                                    data=pdf_bytes,
-                                    mime_type=mime_type,
-                                ),
-                                prompt,
-                            ],
-                        )
-                        text_val = (response.text or "").strip()
-                        if text_val:
-                            extracted_text = text_val
+                # OCR has its own quota on every key: on a rate limit, the same model is
+                # tried with the next key before moving to another model.
+                for ocr_model in dict.fromkeys(candidate_ocr_models):
+                    for key in self.pool.keys:
+                        try:
+                            logger.info("Executing Gemini OCR with model '%s' (key %s)...", ocr_model, mask(key))
+                            response = self.client_for(key).models.generate_content(
+                                model=ocr_model,
+                                contents=[
+                                    types.Part.from_bytes(
+                                        data=pdf_bytes,
+                                        mime_type=mime_type,
+                                    ),
+                                    prompt,
+                                ],
+                            )
+                            extracted_text = (response.text or "").strip()
                             break
-                    except Exception as model_err:
-                        logger.warning("Gemini OCR failed for model '%s': %s", ocr_model, model_err)
-                        continue
+                        except Exception as model_err:
+                            if is_rate_limit(model_err):
+                                logger.warning("Gemini OCR key %s is rate-limited for '%s'", mask(key), ocr_model)
+                                continue
+                            logger.warning("Gemini OCR failed for model '%s': %s", ocr_model, model_err)
+                            break
+                    if extracted_text:
+                        break
 
                 if extracted_text:
                     logger.info("Gemini OCR succeeded: extracted %d characters.", len(extracted_text))
@@ -216,23 +227,23 @@ class GeminiService:
             return None
 
         from google.genai import types
-        client = self.get_genai_client()
-        if client is None:
-            return None
+        import time
+        from app.services.key_pool import is_bad_key, is_rate_limit, mask
+        transient = 0
 
-        # Models that support audio output modalities
-        candidate_models = [
-            settings.GEMINI_TTS_MODEL,
-            "gemini-3.8-flash-tts",
-            "gemini-3.8-flash-lite-tts",
-            "gemini-3.1-flash-tts-preview",
-        ]
+        # Only the configured TTS model (gemini-3.8-flash-tts); keys rotate within its quota.
+        model = settings.GEMINI_TTS_MODEL
 
         # Send only the text to narrate: TTS models speak the whole prompt, so any
         # instruction placed here would be read aloud at the start of the audio.
         prompt = text
 
-        for model in candidate_models:
+        # Each attempt uses the key with the most room left; a 429 takes that key out
+        # (for a minute or for the day) and the next one is tried. When every key's day
+        # is used up, acquire() raises QuotaExhausted.
+        for _ in range(len(self.pool.keys) * 2 + 4):
+            key = self.pool.acquire(model)
+            client = self.client_for(key)
             try:
                 logger.info("Attempting Gemini audio generation with model '%s' and voice '%s'...", model, voice_name)
                 config = types.GenerateContentConfig(
@@ -265,9 +276,23 @@ class GeminiService:
                             wav_data = convert_pcm_to_wav(raw_audio, sample_rate=24000)
                             return wav_data
 
+                # The TTS model sometimes answers without audio; another try usually works.
+                logger.warning("Gemini returned no audio for this text (key %s); retrying", mask(key))
+                time.sleep(2)
             except Exception as exc:
-                logger.warning("Gemini audio modality failed for model '%s': %s", model, exc)
-                continue
+                if is_rate_limit(exc):
+                    self.pool.report_limit(key, model, exc)
+                    continue
+                if is_bad_key(exc):
+                    self.pool.disable(key, model, exc)
+                    continue
+                # Overloaded (500/503), timeouts and other passing errors: back off and try
+                # again (on the next key); give up after a few attempts.
+                transient += 1
+                logger.warning("Gemini TTS error (attempt %d) with key %s: %s", transient, mask(key), exc)
+                if transient >= 4:
+                    return None
+                time.sleep(min(20, 3 * 2 ** (transient - 1)))
 
         return None
 
@@ -295,13 +320,20 @@ class GeminiService:
         voice_choice = speaker or settings.GEMINI_VOICE or "Puck"
 
         # 1. Gemini API Audio Generation
+        from app.services.key_pool import QuotaExhausted
         if settings.TTS_PROVIDER == "gemini" and self.is_configured:
             try:
                 wav_bytes = self._synthesize_gemini(text=text, voice_name=voice_choice)
                 if wav_bytes:
                     logger.info("Gemini speech synthesis succeeded!")
+            except QuotaExhausted:
+                if settings.GEMINI_TTS_ONLY:
+                    raise  # the platform waits for the quota reset
+                logger.warning("Every Gemini key has used its daily quota; using a fallback voice")
             except Exception as exc:
                 logger.warning("Gemini synthesis attempt encountered error: %s", exc)
+            if not wav_bytes and settings.GEMINI_TTS_ONLY:
+                raise RuntimeError("Gemini TTS did not return audio")
 
         # 2. Neural Bengali / English TTS fallback (Edge TTS)
         if not wav_bytes:

@@ -31,6 +31,9 @@ services:
         generateValue: true
       - key: GEMINI_API_KEY
         sync: false
+      # Extra Gemini keys, comma separated; TTS rotates through all of them.
+      - key: GEMINI_API_KEYS
+        sync: false
       # Admin portal origin on Vercel (the portal proxies /api, so this only guards browsers)
       - key: ALLOWED_ORIGINS
         value: https://bornoverse-admin.vercel.app

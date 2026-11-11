@@ -30,6 +30,7 @@ from app.schemas.tts import (
 )
 from app.services.tts_service import tts_service
 from app.services.job_service import job_service
+from app.services.key_pool import QuotaExhausted
 
 # Logging setup
 logging.basicConfig(
@@ -196,9 +197,24 @@ def generate_audio(request: TextRequest):
             filename=filename,
             background=BackgroundTask(Path(audio_path).unlink, missing_ok=True),
         )
+    except QuotaExhausted as exc:
+        # Every key used its daily quota: tell the caller when to come back.
+        logger.warning("%s", exc)
+        return JSONResponse({"detail": str(exc), "retry_after": exc.retry_after}, status_code=429,
+                            headers={"Retry-After": str(exc.retry_after)})
     except Exception as exc:
         logger.error("TTS generation failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/quota")
+def quota():
+    """How many TTS requests each Gemini key has used today (keys are masked)."""
+    from app.services.gemini_service import gemini_service
+    model = settings.GEMINI_TTS_MODEL
+    keys = gemini_service.pool.status(model)
+    left = sum(max(0, k["limit"] - k["used_today"]) for k in keys if not k["exhausted"])
+    return {"model": model, "keys": keys, "requests_left_today": left}
 
 
 @app.post("/jobs", response_model=JobStatusResponse)

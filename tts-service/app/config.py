@@ -17,10 +17,28 @@ class Settings(BaseSettings):
     GEMINI_VOICE: str = "Puck"
     TTS_PROVIDER: str = "gemini"  # "gemini", "edge", "vits", "xtts"
 
+    # More keys (from other Google accounts), comma or newline separated. They are
+    # used together with GEMINI_API_KEY in rotation.
+    GEMINI_API_KEYS: str = ""
+    # Free-tier limits per key for the TTS model.
+    GEMINI_TTS_RPM: int = 5
+    GEMINI_TTS_RPD: int = 10
+    # Narrate only with GEMINI_TTS_MODEL. When every key's daily quota is used, the
+    # request is refused (HTTP 429) and the platform waits for the reset instead of
+    # switching to Edge/gTTS voices. Set false to allow those fallbacks again.
+    GEMINI_TTS_ONLY: bool = True
+
     @property
     def effective_gemini_api_key(self) -> str:
+        keys = self.gemini_api_keys
+        return keys[0] if keys else ""
+
+    @property
+    def gemini_api_keys(self) -> List[str]:
         import os
-        return (self.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")).strip()
+        import re
+        raw = ",".join([self.GEMINI_API_KEY, self.GEMINI_API_KEYS, os.environ.get("GOOGLE_API_KEY", "")])
+        return list(dict.fromkeys(k.strip() for k in re.split(r"[,\s]+", raw) if k.strip()))
 
     # Model Configurations
     BANGLA_MODEL_REPO: str = "EMTIAZZ/bangladeshi-bangla-tts-vits"
